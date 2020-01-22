@@ -1,7 +1,6 @@
 from torch.autograd import Variable
 import torch
 
-
 class Test():
     
     def __init__(self, model, data_loader, criterion, metric):

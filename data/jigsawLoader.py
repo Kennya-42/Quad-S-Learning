@@ -8,7 +8,7 @@ import numpy as np
 import torch.utils.data as data
 from PIL import Image, ImageOps
 from torchvision import transforms
-import matplotlib.pyplot as plt
+
 from collections import OrderedDict
 import torchvision.transforms.functional as TF
 
@@ -38,7 +38,6 @@ class jigsawLoader(data.Dataset):
         else:
             raise RuntimeError("Unexpected dataset mode. Supported modes are: train, val")
 
-
         img = Image.open(data_path)
         img = img.convert('RGB')
         img = img.resize((225,225))
@@ -53,12 +52,12 @@ class jigsawLoader(data.Dataset):
                 tile = transforms.ToTensor()(tile)
                 tiles.append(tile)
 
-
         img = transforms.ToTensor()(img)
         tiles = torch.stack(tiles, 0)
         order = np.random.randint(len(self.permutations))
-        print(order)
-        return img,tiles
+        perm = self.permutations[order]
+        tiles = tiles[perm]
+        return tiles, order
     
     def get_files(self,folder,extension_filter):
         files = []
@@ -88,7 +87,7 @@ class jigsawLoader(data.Dataset):
             raise RuntimeError("Unexpected dataset mode. Supported modes are: train, val and test")
 
     def __retrive_permutations(self, classes):
-        all_perm = np.load('permutations_%d.npy' % (classes))
+        all_perm = np.load('/home/ken/Documents/Quad-S-Learning/data/permutations_1000.npy')
         # from range [1,9] to [0,8]
         if all_perm.min() == 1:
             all_perm = all_perm - 1
@@ -97,14 +96,10 @@ class jigsawLoader(data.Dataset):
 
 if __name__ == "__main__":
     import utils
+    import matplotlib.pyplot as plt
     train_set = jigsawLoader(root_dir="/home/ken/Documents/Dataset/", mode='val')
     train_loader = data.DataLoader(train_set, batch_size=1, shuffle=False, num_workers=0)
-    img,tiles = iter(train_loader).next()
-    print(tiles.size())
-
-    # img = transforms.ToPILImage(mode='RGB')(img.squeeze())
-    # plt.imshow(img)
-    # plt.show()
+    tiles, order = iter(train_loader).next()
     plt.subplot(331)
     plt.imshow(transforms.ToPILImage(mode='RGB')(tiles.squeeze()[0]))
     plt.subplot(332)
@@ -124,4 +119,3 @@ if __name__ == "__main__":
     plt.subplot(339)
     plt.imshow(transforms.ToPILImage(mode='RGB')(tiles.squeeze()[8]))
     plt.show()
-    

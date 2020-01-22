@@ -1,4 +1,5 @@
-from data import Imagenet as dataset
+from data import relpatchLoader as dataset
+from models.erfnet_relpatch import ERFNet as ERFNet_relpatch
 from models.erfnet import ERFNet
 import torch.nn as nn
 from train import Train
@@ -7,6 +8,7 @@ import torch.utils.data as data
 import torch.optim as optim
 from torch.autograd import Variable
 import torch
+import math
 import argparse
 from path import get_root_path
 
@@ -16,10 +18,12 @@ SAVE_PATH = ROOT_PATH + '/Documents/Quad-S-Learning/save/'
 LEARNING_RATE = 0.00005
 NUM_EPOCHS = 200
 BATCH_SIZE = 20 
-NUM_WORKERS = 20
+NUM_WORKERS = 0
 
 parser = argparse.ArgumentParser()
 parser.add_argument( "--resume", action='store_true')
+parser.add_argument( "--premode",           choices=['none', 'imagenet'], default='imagenet')
+parser.add_argument( "--pretrain-name",  type=str, default='erfnet_encoder.pth')
 args = parser.parse_args()
 
 class accuracy():
@@ -39,11 +43,8 @@ def run_train_epoch(epoch,model,criterion,optimizer,lr_updater,data_loader):
     epoch_loss = 0.0
     model.train()
     metric = accuracy()
-    start = torch.cuda.Event(enable_timing=True)
-    end = torch.cuda.Event(enable_timing=True)
-    start.record()
     for step, batch_data in enumerate(data_loader):
-        inputs, labels = batch_data     
+        inputs, labels = batch_data    
         inputs, labels = Variable(inputs).cuda(), Variable(labels).cuda()
         lr_updater(optimizer, step, epoch)
         #Forward Propagation
@@ -59,9 +60,6 @@ def run_train_epoch(epoch,model,criterion,optimizer,lr_updater,data_loader):
         metric.update(outputs,labels)
 
     epoch_loss = epoch_loss / len(data_loader)
-    end.record()
-    torch.cuda.synchronize()
-    print(start.elapsed_time(end)) #time in milliseconds
     return epoch_loss , metric.get_accuracy()
 
 def run_val_epoch(epoch,model,criterion,optimizer,data_loader):
@@ -78,7 +76,7 @@ def run_val_epoch(epoch,model,criterion,optimizer,data_loader):
             loss = criterion(outputs, labels)
             # Keep track of loss for current epoch
             epoch_loss += loss.item()
-            metric.update( outputs.cpu(), labels.cpu())
+            metric.update( outputs, labels)
 
     epoch_loss = epoch_loss / len(data_loader)
     return epoch_loss , metric.get_accuracy()
@@ -92,7 +90,7 @@ def save_model(model, optimizer, model_path,epoch,val_acc):
         
     torch.save(checkpoint, model_path)
 
-    summary_filename = SAVE_PATH+'Classification/erfnet_encoder_summary.txt'
+    summary_filename = SAVE_PATH+'RelPatch/erfnet_relpatch_summary.txt'
     with open(summary_filename, 'w') as summary_file:
         sorted_args = sorted(vars(args))
         summary_file.write("ARGUMENTS\n")
@@ -108,23 +106,24 @@ def main():
     train_loader = data.DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
     val_set = dataset(root_dir=DATASET_DIR, mode='val')
     val_loader = data.DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
-    model = ERFNet(num_classes=1000,classify=True).cuda()
-    model_path = SAVE_PATH + 'Classification/erfnet_encoder.pth'
+    #Load Model
+    if args.premode == 'none':
+        pretrainedEnc = None
+    elif args.premode == 'imagenet':
+        print("Loading encoder pretrained on imagenet classification")
+        pretrained = ERFNet(1000,classify=True)
+        checkpnt = torch.load(SAVE_PATH+'Classification/' + args.pretrain_name)
+        print("Loading: ",args.pretrain_name)
+        pretrained.load_state_dict(checkpnt['state_dict'])
+        pretrainedEnc = pretrained.encoder
+
+    model = ERFNet_relpatch(num_classes=8,encoder=pretrainedEnc).cuda()
+    model_path = SAVE_PATH+'RelPatch/erfnet_encoder_relpatch.pth'
     criterion = nn.CrossEntropyLoss().cuda()
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.999), eps=1e-08, weight_decay=1e-4)
     lr_updater = Cust_LR_Scheduler(mode='poly', base_lr=LEARNING_RATE, num_epochs=NUM_EPOCHS,iters_per_epoch=len(train_loader))
     best_val_acc = 0
-    start_epoch = 0
-    if args.resume:
-        checkpoint = torch.load(SAVE_PATH+'Classification/erfnet_encoder.pth')
-        model.load_state_dict(checkpoint['state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        start_epoch = checkpoint['epoch']
-        best_val_acc = checkpoint['val_acc']
-        print('resuming on epoch: ',start_epoch)
-        print('best val acc: ',best_val_acc)
-        
-    for epoch in range(start_epoch, NUM_EPOCHS):
+    for epoch in range(0, NUM_EPOCHS):
         print(">> [Epoch: {0:d}] Training LR: {1:.8f}".format(epoch,lr_updater.get_LR(epoch)))
 
         epoch_loss, train_acc = run_train_epoch(epoch, model, criterion, optimizer, lr_updater, train_loader)

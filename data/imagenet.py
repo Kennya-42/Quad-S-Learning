@@ -8,7 +8,6 @@ import numpy as np
 import torch.utils.data as data
 from PIL import Image, ImageOps
 from torchvision import transforms
-import matplotlib.pyplot as plt
 from collections import OrderedDict
 import torchvision.transforms.functional as TF
 
@@ -94,6 +93,7 @@ class Imagenet(data.Dataset):
 
 if __name__ == "__main__":
     import utils
+    import matplotlib.pyplot as plt
     train_set = Imagenet(root_dir="/home/ken/Documents/Dataset/", mode='val')
     train_loader = data.DataLoader(train_set, batch_size=1, shuffle=True, num_workers=0)
     timages, tlabels = iter(train_loader).next()

@@ -236,6 +236,7 @@ class RandomTranslation(object):
         return {'image': img,'label': mask}
 
 if __name__ == "__main__":
+    import matplotlib.pyplot as plt
     img = Image.open("/home/ken/Documents/RealtimeSS/test_content/aachen_000000_000019_leftImg8bit.png")
     mask = Image.open("/home/ken/Documents/RealtimeSS/test_content/aachen_000000_000019_gtFine_labelIds.png")
     sample = {'image': img, 'label': mask}

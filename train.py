@@ -1,11 +1,11 @@
 from torch.autograd import Variable
 import torch
 import torchvision
-import matplotlib.pyplot as plt
-import numpy as np
-import torchvision.transforms as transforms
-import utils
-from collections import OrderedDict
+# import matplotlib.pyplot as plt
+# import numpy as np
+# import torchvision.transforms as transforms
+# import utils
+# from collections import OrderedDict
 class Train():
     def __init__(self, model, data_loader, optim, criterion, metric,lr_updater):
         self.model = model

@@ -8,7 +8,7 @@ import numpy as np
 import torch.utils.data as data
 from PIL import Image, ImageOps
 from torchvision import transforms
-import matplotlib.pyplot as plt
+
 from collections import OrderedDict
 import torchvision.transforms.functional as TF
 
@@ -54,10 +54,12 @@ class relpatchLoader(data.Dataset):
 
         img = transforms.ToTensor()(img)
         lst = [0,1,2,3,5,6,7,8]
-        label = lst[np.random.randint(len(lst))]
+        label = np.random.randint(len(lst))
+        indx = lst[np.random.randint(len(lst))]
         tile1 = tiles[4]
-        tile2 = tiles[label]
-        return img, tile1, tile2, label
+        tile2 = tiles[indx]
+        tileStack = torch.stack((tile1,tile2),0)
+        return tileStack, label
     
     def get_files(self,folder,extension_filter):
         files = []
@@ -90,6 +92,7 @@ class relpatchLoader(data.Dataset):
 
 if __name__ == "__main__":
     import utils
+    import matplotlib.pyplot as plt
     train_set = relpatchLoader(root_dir="/home/ken/Documents/Dataset/", mode='val')
     train_loader = data.DataLoader(train_set, batch_size=1, shuffle=False, num_workers=0)
     img, tile1, tile2, label = iter(train_loader).next()

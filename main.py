@@ -13,7 +13,7 @@ from models.enet import ENet
 from models.erfnet import ERFNet
 from train import Train
 from test import Test
-from metric.iou import iou
+from metric.iou import IoU
 import utils
 from PIL import Image
 import time
@@ -21,7 +21,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from argparse import ArgumentParser
 
-args = get_arguments()
+
 
 def get_arguments():
     parser = ArgumentParser()
@@ -41,10 +41,11 @@ def get_arguments():
     parser.add_argument( "--dataset-dir",    type=str, default="/home/ken/Documents/Dataset/")
     parser.add_argument( "--height",         type=int, default=512)
     parser.add_argument( "--width",          type=int, default=1024)
-    
+    # Save
     parser.add_argument( "--name",           type=str, default='ERFnet.pth')
-    parser.add_argument( "--pretrain_name",  type=str, default='erfnet_encoder_pretrained.pth')
-    parser.add_argument( "--save-dir",       type=str, default='save/ERFnet')
+    parser.add_argument( "--premode",           choices=['none', 'class','rot'], default='None')
+    parser.add_argument( "--pretrain-name",  type=str, default='erfnet_encoder.pth')
+    parser.add_argument( "--save-dir",       type=str, default='save/SemanticSeg')
 
     return parser.parse_args()
 
@@ -104,34 +105,37 @@ def train(train_loader, val_loader, class_weights, class_encoding):
     print("Training...")
     num_classes = len(class_encoding)
     # pick model
-    print("Loading encoder pretrained in imagenet")
-
-    pretrainedEnc = ERFNet(1000,classify=True)
-    checkpnt = torch.load('save/erfnet_encoder.pth')
-    pretrainedEnc.load_state_dict(checkpnt['state_dict'])
+    
+    if args.premode == 'none':
+        pretrainedEnc = None
+    elif args.premode == 'class':
+        print("Loading encoder pretrained on imagenet classification")
+        pretrained = ERFNet(1000,classify=True)
+        checkpnt = torch.load('save/Classification/' + args.pretrain_name)
+        print("Loading: ",args.pretrain_name)
+        pretrained.load_state_dict(checkpnt['state_dict'])
+        pretrainedEnc = pretrained.encoder
+    elif args.premode == 'rot':
+        print("Loading encoder pretrained on imagenet rotations")
+        pretrained = ERFNet(4,classify=True)
+        checkpnt = torch.load('save/Rotation/' + args.pretrain_name)
+        print("Loading: ",args.pretrain_name)
+        pretrained.load_state_dict(checkpnt['state_dict'])
+        pretrainedEnc = pretrained.encoder
 
     if args.model.lower() == 'erfnet':
         print("Model Name: ERFnet")
-        model = ERFNet(num_classes,encoder=pretrainedEnc.encoder)
+        model = ERFNet(num_classes,encoder=pretrainedEnc)
         train_params = model.parameters()
     
-    # Define Optimizer
-    if args.optimizer == 'SGD':
-        print('Optimizer: SGD')
-        optimizer = torch.optim.SGD(train_params, momentum=0.9, weight_decay=args.weight_decay)
-    else:
-        print('Optimizer: Adam')
-        optimizer = optim.Adam(train_params, lr=args.learning_rate, betas=(0.9, 0.999), eps=1e-08, weight_decay=args.weight_decay)
+    
+    print('Optimizer: Adam')
+    optimizer = optim.Adam(train_params, lr=args.learning_rate, betas=(0.9, 0.999), eps=1e-08, weight_decay=args.weight_decay)
     print('Base Learning Rate: ',args.learning_rate)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     # Evaluation metric
-    if args.ignore_unlabeled:
-        ignore_index = list(class_encoding).index('unlabeled')
-    else:
-        ignore_index = None
 
-    metric = IoU(num_classes, ignore_index=ignore_index)
-
+    metric = IoU(num_classes)
     model = model.cuda()
     criterion = criterion.cuda()
     
@@ -211,6 +215,7 @@ def test(model, test_loader, class_weights, class_encoding):
 if __name__ == '__main__':
     
     assert torch.cuda.is_available(), "no GPU connected"
+    args = get_arguments()
 
     if args.dataset.lower() == 'cityscapes':
         from data import Cityscapes as dataset

@@ -1,5 +1,6 @@
 from data import jigsawLoader as dataset
-from models.erfnet_jigsaw import ERFNet
+from models.erfnet_jigsaw import ERFNet as ERFNet_jig
+from models.erfnet import ERFNet
 import torch.nn as nn
 from train import Train
 from lr_scheduler import Cust_LR_Scheduler
@@ -9,16 +10,20 @@ from torch.autograd import Variable
 import torch
 import math
 import argparse
+from path import get_root_path
 
-DATASET_DIR = "/home/ken/Documents/Dataset/"
-SAVE_PATH = '/home/ken/Documents/RealtimeSS/save'
+ROOT_PATH = get_root_path()
+DATASET_DIR = ROOT_PATH + "/Documents/Dataset/"
+SAVE_PATH = ROOT_PATH + '/Documents/Quad-S-Learning/save/'
 LEARNING_RATE = 0.0005
 NUM_EPOCHS = 200
 BATCH_SIZE = 20 
-NUM_WORKERS = 20
+NUM_WORKERS = 0
 
 parser = argparse.ArgumentParser()
 parser.add_argument( "--resume", action='store_true')
+parser.add_argument( "--premode",           choices=['none', 'imagenet'], default='imagenet')
+parser.add_argument( "--pretrain-name",  type=str, default='erfnet_encoder.pth')
 args = parser.parse_args()
 
 class accuracy():
@@ -39,7 +44,7 @@ def run_train_epoch(epoch,model,criterion,optimizer,lr_updater,data_loader):
     model.train()
     metric = accuracy()
     for step, batch_data in enumerate(data_loader):
-        inputs, labels = batch_data     
+        inputs, labels = batch_data    
         inputs, labels = Variable(inputs).cuda(), Variable(labels).cuda()
         lr_updater(optimizer, step, epoch)
         #Forward Propagation
@@ -58,7 +63,7 @@ def run_train_epoch(epoch,model,criterion,optimizer,lr_updater,data_loader):
     epoch_loss = epoch_loss / len(data_loader)
     return epoch_loss , metric.get_accuracy()
 
-def run_val_epoch(epoch,model,criterion,optimizer,lr_updater,data_loader):
+def run_val_epoch(epoch,model,criterion,optimizer,data_loader):
     epoch_loss = 0.0
     model.eval()
     metric = accuracy()
@@ -74,7 +79,6 @@ def run_val_epoch(epoch,model,criterion,optimizer,lr_updater,data_loader):
             epoch_loss += loss.item()
             metric.update( outputs, labels)
 
-    acc = metric.get_accuracy()
     epoch_loss = epoch_loss / len(data_loader)
     return epoch_loss , metric.get_accuracy()
 
@@ -87,7 +91,7 @@ def save_model(model, optimizer, model_path,epoch,val_acc):
         
     torch.save(checkpoint, model_path)
 
-    summary_filename = SAVE_PATH+'/erfnet_rot_summary.txt'
+    summary_filename = SAVE_PATH+'Jigsaw/erfnet_jigsaw_summary.txt'
     with open(summary_filename, 'w') as summary_file:
         sorted_args = sorted(vars(args))
         summary_file.write("ARGUMENTS\n")
@@ -103,8 +107,19 @@ def main():
     train_loader = data.DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
     val_set = dataset(root_dir=DATASET_DIR, mode='val')
     val_loader = data.DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
-    model = ERFNet(num_classes=4,classify=True).cuda()
-    model_path = SAVE_PATH+'/erfnet_encoder_rot.pth'
+    #Load Model
+    if args.premode == 'none':
+        pretrainedEnc = None
+    elif args.premode == 'imagenet':
+        print("Loading encoder pretrained on imagenet classification")
+        pretrained = ERFNet(1000,classify=True)
+        checkpnt = torch.load(SAVE_PATH+'Classification/' + args.pretrain_name)
+        print("Loading: ",args.pretrain_name)
+        pretrained.load_state_dict(checkpnt['state_dict'])
+        pretrainedEnc = pretrained.encoder
+
+    model = ERFNet_jig(num_classes=1000,encoder=pretrainedEnc).cuda()
+    model_path = SAVE_PATH+'Jigsaw/erfnet_encoder_jigsaw.pth'
     criterion = nn.CrossEntropyLoss().cuda()
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.999), eps=1e-08, weight_decay=1e-4)
     lr_updater = Cust_LR_Scheduler(mode='poly', base_lr=LEARNING_RATE, num_epochs=NUM_EPOCHS,iters_per_epoch=len(train_loader))
@@ -116,7 +131,7 @@ def main():
 
         print(">> Epoch: %d | Loss: %2.4f | Train Acc: %2.4f" %(epoch,epoch_loss,train_acc))
 
-        val_loss, val_acc = run_val_epoch(epoch, model, criterion, optimizer, lr_updater, val_loader)
+        val_loss, val_acc = run_val_epoch(epoch, model, criterion, optimizer, val_loader)
 
         print(">>>> Val Epoch: %d | Loss: %2.4f | Val Acc: %2.4f" %(epoch, val_loss, val_acc))
         

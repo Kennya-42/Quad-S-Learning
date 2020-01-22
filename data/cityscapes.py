@@ -5,14 +5,11 @@ from torchvision import transforms
 from collections import OrderedDict
 import torch.utils.data as data
 from PIL import Image, ImageOps
-import matplotlib.pyplot as plt
+
 import numpy as np
 import random
 import torch
 import os
-# import PIL
-# from . import augment
-# from . import autoaugment
 
 def pil_loader(data_path, label_path):
     data = Image.open(data_path)
@@ -88,16 +85,6 @@ class Cityscapes(data.Dataset):
         img = img.convert('RGB')
         label = label.convert('P')
         
-        # mask = np.array(label).astype(np.int64)
-        # mask = torch.from_numpy(mask)
-        # mask = utils.LongTensorToRGBPIL(None)(mask)
-        # f, axarr = plt.subplots(2,2)
-        # axarr[0,0].imshow(img)
-        # axarr[0,1].imshow(mask)
-        # Mixup https://forums.fast.ai/t/mixup-data-augmentation/22764
-        # PIL.Image.blend(im1, im2, alpha) #interpolate 2 images
-        # Scale hue, saturation, and brightness with coefficientsuniformly drawn from [0.6,1.4]
-        # add PCA noise from normal dist N(0,0.1)
         sample = {'image': img, 'label': label}
 
         if self.mode.lower() == 'train':
@@ -143,6 +130,7 @@ class Cityscapes(data.Dataset):
 if __name__ == "__main__":
     import utils
     import custom_transforms as tr
+    import matplotlib.pyplot as plt
     train_set = Cityscapes(root_dir="/home/ken/Documents/Dataset/", mode='train',height=512, width=1024)
     train_loader = data.DataLoader(train_set, batch_size=1, shuffle=False, num_workers=0)
     timages, tlabels = iter(train_loader).next()
