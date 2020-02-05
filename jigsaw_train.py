@@ -101,6 +101,8 @@ def save_model(model, optimizer, model_path,epoch,val_acc):
         summary_file.write("\nBEST VALIDATION\n")
         summary_file.write("Epoch: {0}\n". format(epoch))
         summary_file.write("Val Acc: {0}\n". format(val_acc))
+        summary_file.write("Batch_size: {0}\n". format(BATCH_SIZE))
+        summary_file.write("Learning Rate: {0}\n". format(LEARNING_RATE))
     
 def main():
     train_set = dataset(root_dir=DATASET_DIR, mode='train')

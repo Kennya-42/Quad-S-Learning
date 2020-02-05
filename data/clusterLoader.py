@@ -4,13 +4,9 @@ import torch
 import random
 import PIL
 import numpy as np
-# from . import utils
 import torch.utils.data as data
 from PIL import Image, ImageOps
 from torchvision import transforms
-
-from collections import OrderedDict
-import torchvision.transforms.functional as TF
 
 class clusterLoader(data.Dataset):
     #dataset root folders
@@ -43,16 +39,16 @@ class clusterLoader(data.Dataset):
             label_path = self.val_data_gt[index]
         else:
             raise RuntimeError("Unexpected dataset mode. Supported modes are: train, val")
-
+            
         img = Image.open(data_path)
         label = Image.open(label_path)
         img = img.convert('RGB')
         label = label.convert('L')
         img = transforms.ToTensor()(img)
-        label = transforms.ToTensor()(label)
-        label = label.type(torch.long).squeeze()
+        label = np.array(label).astype(np.int64)
+        label = torch.from_numpy(label)
+        label = label.type(torch.LongTensor)
         img = transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])(img)
-        # label = 1
         return img, label
     
     def get_files_train(self,folder,extension_filter):
@@ -64,7 +60,7 @@ class clusterLoader(data.Dataset):
             f = glob.glob(os.path.join(folder, class_folder)+'/*'+extension_filter)
             for file in f:
                 files.append(file)
-
+        files.sort()
         return files
 
     def get_files_val(self,folder,extension_filter):
@@ -86,10 +82,13 @@ class clusterLoader(data.Dataset):
 if __name__ == "__main__":
     import utils
     import matplotlib.pyplot as plt
-    train_set = clusterLoader(root_dir="/home/ken/Documents/Dataset/", mode='val')
-    train_loader = data.DataLoader(train_set, batch_size=2, shuffle=False, num_workers=0)
+    train_set = clusterLoader(root_dir="/home/ken/Documents/Dataset/", mode='train')
+    train_loader = data.DataLoader(train_set, batch_size=2, shuffle=True, num_workers=0)
     img, label = iter(train_loader).next()
-    img = transforms.ToPILImage(mode='L')(label[0])
+    img = transforms.ToPILImage(mode='RGB')(img[0])
+    plt.subplot(211)
     plt.imshow(img)
+    plt.subplot(212)
+    plt.imshow(label[0])
     plt.show()
     

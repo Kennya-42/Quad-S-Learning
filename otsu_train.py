@@ -1,5 +1,4 @@
-from data import relpatchLoader as dataset
-from models.erfnet_relpatch import ERFNet as ERFNet_relpatch
+from data import otsuLoader as dataset
 from models.erfnet import ERFNet
 import torch.nn as nn
 from train import Train
@@ -11,18 +10,19 @@ import torch
 import math
 import argparse
 from path import get_root_path
+from metric.iou import IoU
 
 ROOT_PATH = get_root_path()
 DATASET_DIR = ROOT_PATH + "/Documents/Dataset/"
 SAVE_PATH = ROOT_PATH + '/Documents/Quad-S-Learning/save/'
-LEARNING_RATE = 0.00000001
+LEARNING_RATE = 0.00005
 NUM_EPOCHS = 200
-BATCH_SIZE = 20 
+BATCH_SIZE = 2 
 NUM_WORKERS = 0
 
 parser = argparse.ArgumentParser()
 parser.add_argument( "--resume", action='store_true')
-parser.add_argument( "--premode",           choices=['none', 'imagenet'], default='none')
+parser.add_argument( "--premode",           choices=['none', 'imagenet'], default='imagenet')
 parser.add_argument( "--pretrain-name",  type=str, default='erfnet_encoder.pth')
 args = parser.parse_args()
 
@@ -31,7 +31,6 @@ class accuracy():
         self.num_correct = 0
         self.total = 0
     def update(self,output,label):
-        output = torch.softmax(output, dim=1)
         _,pred = torch.max(output, 1)
         c = (pred == label).squeeze()
         self.num_correct += c.sum().item()
@@ -43,9 +42,9 @@ class accuracy():
 def run_train_epoch(epoch,model,criterion,optimizer,lr_updater,data_loader):
     epoch_loss = 0.0
     model.train()
-    metric = accuracy()
+    metric = IoU(4)
     for step, batch_data in enumerate(data_loader):
-        inputs, labels = batch_data
+        inputs, labels = batch_data     
         inputs, labels = Variable(inputs).cuda(), Variable(labels).cuda()
         lr_updater(optimizer, step, epoch)
         #Forward Propagation
@@ -58,15 +57,16 @@ def run_train_epoch(epoch,model,criterion,optimizer,lr_updater,data_loader):
         optimizer.step()
         # Keep track of loss for current epoch
         epoch_loss += loss.item()
-        metric.update(outputs,labels)
+        metric.add(outputs.data, labels.data)
 
+    iou,miou = metric.value()
     epoch_loss = epoch_loss / len(data_loader)
-    return epoch_loss , metric.get_accuracy()
+    return epoch_loss , metric.value()
 
 def run_val_epoch(epoch,model,criterion,optimizer,data_loader):
     epoch_loss = 0.0
     model.eval()
-    metric = accuracy()
+    metric = IoU(4)
     for step, batch_data in enumerate(data_loader):
         with torch.no_grad():
             inputs, labels = batch_data     
@@ -77,10 +77,11 @@ def run_val_epoch(epoch,model,criterion,optimizer,data_loader):
             loss = criterion(outputs, labels)
             # Keep track of loss for current epoch
             epoch_loss += loss.item()
-            metric.update( outputs, labels)
+            metric.add(outputs.data, labels.data)
 
+    iou,miou = metric.value()
     epoch_loss = epoch_loss / len(data_loader)
-    return epoch_loss , metric.get_accuracy()
+    return epoch_loss , metric.value()
 
 def save_model(model, optimizer, model_path,epoch,val_acc):
     checkpoint = {
@@ -91,7 +92,7 @@ def save_model(model, optimizer, model_path,epoch,val_acc):
         
     torch.save(checkpoint, model_path)
 
-    summary_filename = SAVE_PATH+'relPatch/erfnet_relpatch_summary.txt'
+    summary_filename = SAVE_PATH+'otsu/erfnet_cluster_otsu_summary.txt'
     with open(summary_filename, 'w') as summary_file:
         sorted_args = sorted(vars(args))
         summary_file.write("ARGUMENTS\n")
@@ -101,8 +102,6 @@ def save_model(model, optimizer, model_path,epoch,val_acc):
         summary_file.write("\nBEST VALIDATION\n")
         summary_file.write("Epoch: {0}\n". format(epoch))
         summary_file.write("Val Acc: {0}\n". format(val_acc))
-        summary_file.write("Batch_size: {0}\n". format(BATCH_SIZE))
-        summary_file.write("Learning Rate: {0}\n". format(LEARNING_RATE))
     
 def main():
     train_set = dataset(root_dir=DATASET_DIR, mode='train')
@@ -115,30 +114,34 @@ def main():
     elif args.premode == 'imagenet':
         print("Loading encoder pretrained on imagenet classification")
         pretrained = ERFNet(1000,classify=True)
-        checkpnt = torch.load(SAVE_PATH+'classification/' + args.pretrain_name)
+        checkpnt = torch.load(SAVE_PATH+'Classification/' + args.pretrain_name)
         print("Loading: ",args.pretrain_name)
         pretrained.load_state_dict(checkpnt['state_dict'])
         pretrainedEnc = pretrained.encoder
 
-    model = ERFNet_relpatch(num_classes=8,encoder=pretrainedEnc).cuda()
-    model_path = SAVE_PATH+'relPatch/erfnet_encoder_relpatch.pth'
+    model = ERFNet(num_classes=4,classify=False,encoder=pretrainedEnc).cuda()
+    model_path = SAVE_PATH+'otsu/erfnet_encoder_otsu.pth'
     criterion = nn.CrossEntropyLoss().cuda()
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.999), eps=1e-08, weight_decay=1e-4)
     lr_updater = Cust_LR_Scheduler(mode='poly', base_lr=LEARNING_RATE, num_epochs=NUM_EPOCHS,iters_per_epoch=len(train_loader))
-    best_val_acc = 0
+    best_val_miou = 0
     for epoch in range(0, NUM_EPOCHS):
         print(">> [Epoch: {0:d}] Training LR: {1:.8f}".format(epoch,lr_updater.get_LR(epoch)))
 
-        epoch_loss, train_acc = run_train_epoch(epoch, model, criterion, optimizer, lr_updater, train_loader)
-        print(">> Epoch: %d | Loss: %2.4f | Train Acc: %2.4f" %(epoch,epoch_loss,train_acc))
+        epoch_loss, (tiou,tmiou) = run_train_epoch(epoch, model, criterion, optimizer, lr_updater, train_loader)
 
-        val_loss, val_acc = run_val_epoch(epoch, model, criterion, optimizer, val_loader)
-        print(">>>> Val Epoch: %d | Loss: %2.4f | Val Acc: %2.4f" %(epoch, val_loss, val_acc))
+        print(">> Epoch: %d | Loss: %2.4f | Train Miou: %2.4f" %(epoch,epoch_loss,tmiou))
+
+        val_loss, (viou,vmiou) = run_val_epoch(epoch, model, criterion, optimizer, val_loader)
         
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
+
+        print(">>>> Val Epoch: %d | Loss: %2.4f | Val Miou: %2.4f" %(epoch, val_loss, vmiou))
+        
+        if vmiou > best_val_miou:
+            best_val_miou = vmiou
             print('saving best model')
-            save_model(model, optimizer, model_path,epoch,val_acc)
+            save_model(model, optimizer, model_path,epoch,best_val_miou)
+        
 
 
 if __name__ == '__main__':

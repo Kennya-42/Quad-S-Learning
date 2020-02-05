@@ -1,65 +1,65 @@
 import os
 import glob
 import torch
-import random
 import numpy as np
 import torch.utils.data as data
-from PIL import Image, ImageOps, ImageCms
+from PIL import Image
 from torchvision import transforms
-import matplotlib.pyplot as plt
-from collections import OrderedDict
-import torchvision.transforms.functional as TF
 
-class colorizeLoader(data.Dataset):
+class otsuLoader(data.Dataset):
+    #dataset root folders
     train_folder = "ImageNet/train"
+    train_folder_gt = "otsu/train"
     val_folder = "ImageNet/val"
+    val_folder_gt = "otsu/val"
     img_extension = '.JPEG'
+    label_extension = '.png'
     
     def __init__(self, root_dir, mode='train'):
         self.root_dir = root_dir
         self.mode = mode
+        print('init: ',mode)
 
         if self.mode.lower() == 'train':
-            self.train_data = self.get_files(folder=os.path.join(root_dir, self.train_folder),extension_filter=self.img_extension )
+            self.train_data = self.get_files_train(folder=os.path.join(root_dir, self.train_folder),extension_filter=self.img_extension )
+            self.train_data_gt = self.get_files_val(folder=os.path.join(root_dir, self.train_folder_gt),extension_filter=self.label_extension )
         elif self.mode.lower() == 'val':
             self.val_data = self.get_files_val(folder=os.path.join(root_dir, self.val_folder),extension_filter=self.img_extension)
+            self.val_data_gt = self.get_files_val(folder=os.path.join(root_dir, self.val_folder_gt),extension_filter=self.label_extension )
         else:
             raise RuntimeError("Unexpected dataset mode. Supported modes are: train, val")
 
     def __getitem__(self, index):
         if self.mode.lower() == 'train':
             data_path = self.train_data[index]
+            label_path = self.train_data_gt[index]
         elif self.mode.lower() == 'val':
             data_path = self.val_data[index]
+            label_path = self.val_data_gt[index]
         else:
             raise RuntimeError("Unexpected dataset mode. Supported modes are: train, val")
 
-        # print(data_path)
         img = Image.open(data_path)
-        img = img.resize((224,224))
-
-        srgb_p = ImageCms.createProfile("sRGB")
-        lab_p  = ImageCms.createProfile("LAB")
-        rgb2lab = ImageCms.buildTransformFromOpenProfiles(srgb_p, lab_p, "RGB", "LAB")
-        img = ImageCms.applyTransform(img, rgb2lab)
-        
-        (L,A,B) = img.split()
+        label = Image.open(label_path)
+        img = img.convert('RGB')
+        label = label.convert('L')
         img = transforms.ToTensor()(img)
-        L = transforms.ToTensor()(L)
-        A = transforms.ToTensor()(A)
-        B = transforms.ToTensor()(B)
-        Lstack = torch.cat((L,L,L),0)
-        return Lstack, A, B 
+        label = np.array(label).astype(np.int64)
+        label = torch.from_numpy(label)
+        label = label.type(torch.LongTensor)
+        img = transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])(img)
+        return img, label
     
-    def get_files(self,folder,extension_filter):
+    def get_files_train(self,folder,extension_filter):
         files = []
         folders = os.listdir(folder)
         folders.sort()
+        #index is class label associated with class_folder
         for index, class_folder in enumerate(folders):
             f = glob.glob(os.path.join(folder, class_folder)+'/*'+extension_filter)
             for file in f:
                 files.append(file)
-
+        files.sort()
         return files
 
     def get_files_val(self,folder,extension_filter):
@@ -78,11 +78,11 @@ class colorizeLoader(data.Dataset):
         else:
             raise RuntimeError("Unexpected dataset mode. Supported modes are: train, val and test")
 
-
 if __name__ == "__main__":
     import utils
     import matplotlib.pyplot as plt
-    train_set = colorizeLoader(root_dir="/home/ken/Documents/Dataset/", mode='val')
-    train_loader = data.DataLoader(train_set, batch_size=1, shuffle=False, num_workers=0)
-    L, A, B = iter(train_loader).next()
-    
+    train_set = otsuLoader(root_dir="/home/ken/Documents/Dataset/", mode='val')
+    train_loader = data.DataLoader(train_set, batch_size=2, shuffle=False, num_workers=0)
+    img, label = iter(train_loader).next()
+    plt.imshow(label[0])
+    plt.show()

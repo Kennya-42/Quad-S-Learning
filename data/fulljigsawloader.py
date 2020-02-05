@@ -4,13 +4,11 @@ import torch
 import random
 import numpy as np
 import torch.utils.data as data
-from PIL import Image, ImageOps, ImageCms
+from PIL import Image
 from torchvision import transforms
-import matplotlib.pyplot as plt
-from collections import OrderedDict
-import torchvision.transforms.functional as TF
 
-class colorizeLoader(data.Dataset):
+class fulljigsawLoader(data.Dataset):
+    #dataset root folders
     train_folder = "ImageNet/train"
     val_folder = "ImageNet/val"
     img_extension = '.JPEG'
@@ -18,6 +16,7 @@ class colorizeLoader(data.Dataset):
     def __init__(self, root_dir, mode='train'):
         self.root_dir = root_dir
         self.mode = mode
+        self.permutations = self.__retrive_permutations(1000)
 
         if self.mode.lower() == 'train':
             self.train_data = self.get_files(folder=os.path.join(root_dir, self.train_folder),extension_filter=self.img_extension )
@@ -34,22 +33,37 @@ class colorizeLoader(data.Dataset):
         else:
             raise RuntimeError("Unexpected dataset mode. Supported modes are: train, val")
 
-        # print(data_path)
         img = Image.open(data_path)
-        img = img.resize((224,224))
+        img = img.convert('RGB')
+        img = img.resize((225,225))
+        groundtruth = img
+        tiles = []
+        for i in range(3):
+            for j in range(3):
+                x1 = 0 + (75*j) + random.randint(0, 11)
+                y1 = 0 + (75*i) + random.randint(0, 11)
+                x2 = x1 + 64
+                y2 = y1 + 64
+                tile = img.crop((x1,y1,x2,y2))
+                tile = transforms.ToTensor()(tile)
+                tiles.append(tile)
 
-        srgb_p = ImageCms.createProfile("sRGB")
-        lab_p  = ImageCms.createProfile("LAB")
-        rgb2lab = ImageCms.buildTransformFromOpenProfiles(srgb_p, lab_p, "RGB", "LAB")
-        img = ImageCms.applyTransform(img, rgb2lab)
-        
-        (L,A,B) = img.split()
         img = transforms.ToTensor()(img)
-        L = transforms.ToTensor()(L)
-        A = transforms.ToTensor()(A)
-        B = transforms.ToTensor()(B)
-        Lstack = torch.cat((L,L,L),0)
-        return Lstack, A, B 
+        tiles = torch.stack(tiles, 0)
+        order = np.random.randint(len(self.permutations))
+        perm = self.permutations[order]
+        tiles = tiles[perm]
+        print('tiles: ',tiles.size())
+        black1 = torch.zeros(3,64,10)
+        black2 = torch.zeros(3,10,212)
+        stack1 = torch.cat([tiles[0],black1,tiles[1],black1,tiles[2]],2)
+        stack2 = torch.cat([tiles[3],black1,tiles[4],black1,tiles[5]],2)
+        stack3 = torch.cat([tiles[6],black1,tiles[7],black1,tiles[8]],2)
+        shuffled = torch.cat([stack1,black2,stack2,black2,stack3],1)
+        shuffled = torch.nn.ZeroPad2d((6,7,6,7))(shuffled)
+        print('shuffle: ',shuffled.size())
+
+        return shuffled, img
     
     def get_files(self,folder,extension_filter):
         files = []
@@ -78,11 +92,27 @@ class colorizeLoader(data.Dataset):
         else:
             raise RuntimeError("Unexpected dataset mode. Supported modes are: train, val and test")
 
+    def __retrive_permutations(self, classes):
+        print(self.root_dir)
+        all_perm = np.load('/home/ken/Documents/Quad-S-Learning/data/permutations_1000.npy')
+        # from range [1,9] to [0,8]
+        if all_perm.min() == 1:
+            all_perm = all_perm - 1
+
+        return all_perm
 
 if __name__ == "__main__":
     import utils
     import matplotlib.pyplot as plt
-    train_set = colorizeLoader(root_dir="/home/ken/Documents/Dataset/", mode='val')
+    train_set = jigsawLoader(root_dir="/home/ken/Documents/Dataset/", mode='val')
     train_loader = data.DataLoader(train_set, batch_size=1, shuffle=False, num_workers=0)
-    L, A, B = iter(train_loader).next()
+    shuffled, img = iter(train_loader).next()
+    print(shuffled[0].size())
+    img = transforms.ToPILImage(mode='RGB')(img[0])
+    shuffled = transforms.ToPILImage(mode='RGB')(shuffled[0])
     
+    plt.subplot(211)
+    plt.imshow(img)
+    plt.subplot(212)
+    plt.imshow(shuffled)
+    plt.show()

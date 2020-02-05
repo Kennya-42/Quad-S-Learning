@@ -23,9 +23,9 @@ class relpatchLoader(data.Dataset):
         self.mode = mode
 
         if self.mode.lower() == 'train':
-            self.train_data = self.get_files(folder=os.path.join(root_dir, self.train_folder),extension_filter=self.img_extension )
+            self.train_data = self.get_files(folder=os.path.join(root_dir, self.train_folder),extension_filter=self.img_extension )[:200]
         elif self.mode.lower() == 'val':
-            self.val_data = self.get_files_val(folder=os.path.join(root_dir, self.val_folder),extension_filter=self.img_extension)
+            self.val_data = self.get_files_val(folder=os.path.join(root_dir, self.val_folder),extension_filter=self.img_extension)[:50]
         else:
             raise RuntimeError("Unexpected dataset mode. Supported modes are: train, val")
 

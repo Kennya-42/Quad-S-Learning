@@ -21,8 +21,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from argparse import ArgumentParser
 
-
-
 def get_arguments():
     parser = ArgumentParser()
     # Execution mode

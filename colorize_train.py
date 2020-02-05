@@ -16,7 +16,7 @@ DATASET_DIR = ROOT_PATH + "/Documents/Dataset/"
 SAVE_PATH = ROOT_PATH + '/Documents/Quad-S-Learning/save/'
 LEARNING_RATE = 0.00005
 NUM_EPOCHS = 200
-BATCH_SIZE = 10 
+BATCH_SIZE = 2 
 NUM_WORKERS = 0
 
 parser = argparse.ArgumentParser()
@@ -81,7 +81,7 @@ def run_val_epoch(epoch, model, criterion, optimizer, data_loader):
 def save_model(model, optimizer, model_path,epoch,val_avg):
     checkpoint = {
         'epoch':epoch,
-        'val_acc':val_acc,
+        'val_avg_loss':val_avg,
         'state_dict': model.state_dict(),
         'optimizer': optimizer.state_dict()}
         
@@ -97,6 +97,8 @@ def save_model(model, optimizer, model_path,epoch,val_avg):
         summary_file.write("\nBEST VALIDATION\n")
         summary_file.write("Epoch: {0}\n". format(epoch))
         summary_file.write("Val Avg Loss: {0}\n". format(val_avg))
+        summary_file.write("Batch_size: {0}\n". format(BATCH_SIZE))
+        summary_file.write("Learning Rate: {0}\n". format(LEARNING_RATE))
     
 def main():
     train_set = dataset(root_dir=DATASET_DIR, mode='train')
