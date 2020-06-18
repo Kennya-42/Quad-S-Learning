@@ -32,26 +32,24 @@ class Imagenet(data.Dataset):
     def __getitem__(self, index):
         if self.mode.lower() == 'train':
             data_path = self.train_data[index]
+            label = self.train_labels[index]
         elif self.mode.lower() == 'val':
             data_path = self.val_data[index]
+            label = self.val_labels[index] 
         else:
             raise RuntimeError("Unexpected dataset mode. Supported modes are: train, val")
 
-        try:
-            img = Image.open(data_path)
-            img = img.convert('RGB')
-            img = transforms.ToTensor()(img)
-            img = transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])(img)
 
-            if self.mode.lower() == 'train':
-                label = self.train_labels[index]
-            elif self.mode.lower() == 'val':
-                label = self.val_labels[index] 
-        except:
-            print('FAILED TO LOAD: ', data_path )
-            img = torch.rand( 3, 224, 224)
-            label = torch.randint(0,999)
-
+        img = Image.open(data_path)
+        img = img.convert('RGB')
+        img = img.resize((128,128),Image.BILINEAR)
+        # if self.mode == 'train':
+        #     img = transforms.RandomResizedCrop(size=(224,224))(img)
+        #     img = transforms.RandomHorizontalFlip()(img)
+        # else:
+        #     img = transforms.CenterCrop(size=(224,224))(img)
+        img = transforms.ToTensor()(img)
+        # img = transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])(img)
 
         return img, label
     
@@ -94,10 +92,38 @@ class Imagenet(data.Dataset):
 if __name__ == "__main__":
     import utils
     import matplotlib.pyplot as plt
-    train_set = Imagenet(root_dir="/home/ken/Documents/Dataset/", mode='val')
-    train_loader = data.DataLoader(train_set, batch_size=1, shuffle=True, num_workers=0)
-    timages, tlabels = iter(train_loader).next()
-    img = transforms.ToPILImage(mode='RGB')(timages[0])
-    print(tlabels[0].data.numpy())
-    plt.imshow(img)
-    plt.show()
+    train_set = Imagenet(root_dir="/home/ken/Documents/Dataset/", mode='train')
+    train_loader = data.DataLoader(train_set, batch_size=32, shuffle=True, num_workers=0)
+    images, labels = iter(train_loader).next()
+    # print(labels[0].data.numpy())
+    imagestack1 = img = transforms.ToPILImage(mode='RGB')(images[0])
+    imagestack1 = np.array(imagestack1)
+    imagestack2 = img = transforms.ToPILImage(mode='RGB')(images[8])
+    imagestack2 = np.array(imagestack2)
+    imagestack3 = img = transforms.ToPILImage(mode='RGB')(images[16])
+    imagestack3 = np.array(imagestack3)
+    imagestack4 = img = transforms.ToPILImage(mode='RGB')(images[24])
+    imagestack4 = np.array(imagestack4)
+    # print(imagestack.shape)
+    for i in range(1,8):
+        img = transforms.ToPILImage(mode='RGB')(images[i])
+        imagestack1 = np.hstack((imagestack1,img))
+    for i in range(9,16):
+        img = transforms.ToPILImage(mode='RGB')(images[i])
+        imagestack2 = np.hstack((imagestack2,img))
+    for i in range(17,24):
+        img = transforms.ToPILImage(mode='RGB')(images[i])
+        imagestack3 = np.hstack((imagestack3,img))
+    for i in range(25,32):
+        img = transforms.ToPILImage(mode='RGB')(images[i])
+        imagestack4 = np.hstack((imagestack4,img))
+    imagestack = np.vstack((imagestack1,imagestack2))
+    imagestack = np.vstack((imagestack,imagestack3))
+    imagestack = np.vstack((imagestack,imagestack4))
+    # plt.imshow(imagestack)
+    # plt.show()
+    im = Image.fromarray(imagestack)
+    print(im.size)
+    im = im.resize((512,256))
+    im.save('imgnetpreview.png')
+    # im = Image.fromarray(np.uint8(cm.gist_earth(myarray)*255))

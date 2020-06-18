@@ -2,30 +2,35 @@ import os
 import glob
 import torch
 import random
-import PIL
 import numpy as np
-# from . import utils
 import torch.utils.data as data
 from PIL import Image, ImageOps
 from torchvision import transforms
-
-from collections import OrderedDict
-import torchvision.transforms.functional as TF
 
 class relpatchLoader(data.Dataset):
     #dataset root folders
     train_folder = "ImageNet/train"
     val_folder = "ImageNet/val"
+    train_city_folder = 'cluster/city/train'
+    val_city_folder = 'cluster/city/val'
     img_extension = '.JPEG'
+    img_city_extension = '.png'
     
-    def __init__(self, root_dir, mode='train'):
+    def __init__(self, root_dir, mode='train',dataset='imagenet'):
         self.root_dir = root_dir
         self.mode = mode
+        self.dataset = dataset
 
         if self.mode.lower() == 'train':
-            self.train_data = self.get_files(folder=os.path.join(root_dir, self.train_folder),extension_filter=self.img_extension )[:200]
+            if self.dataset == 'imagenet':
+                self.train_data = self.get_files(folder=os.path.join(root_dir, self.train_folder),extension_filter=self.img_extension )
+            else:
+                self.train_data = self.get_files_val(folder=os.path.join(root_dir, self.train_city_folder),extension_filter=self.img_city_extension)
         elif self.mode.lower() == 'val':
-            self.val_data = self.get_files_val(folder=os.path.join(root_dir, self.val_folder),extension_filter=self.img_extension)[:50]
+            if self.dataset == 'imagenet':
+                self.val_data = self.get_files_val(folder=os.path.join(root_dir, self.val_folder),extension_filter=self.img_extension)
+            else:
+                self.val_data = self.get_files_val(folder=os.path.join(root_dir, self.val_city_folder),extension_filter=self.img_city_extension)
         else:
             raise RuntimeError("Unexpected dataset mode. Supported modes are: train, val")
 
@@ -37,10 +42,19 @@ class relpatchLoader(data.Dataset):
         else:
             raise RuntimeError("Unexpected dataset mode. Supported modes are: train, val")
 
-
         img = Image.open(data_path)
         img = img.convert('RGB')
-        img = img.resize((225,225))
+        if self.dataset == 'imagenet':
+            img = transforms.RandomHorizontalFlip(p=0.5)(img)
+            img = img.resize((360,360),Image.BILINEAR)
+            img = transforms.CenterCrop(255)(img)
+        elif self.dataset == 'city':
+            img = transforms.RandomHorizontalFlip(p=0.5)(img)
+            transX = random.randint(-2, 2) 
+            transY = random.randint(-2, 2)
+            img = ImageOps.expand(img, border=(transX,transY,0,0), fill=0)
+            img = transforms.RandomCrop(size=(1000,2000))(img)
+            img = img.resize((225,225),Image.BILINEAR)
         tiles = []
         for i in range(3):
             for j in range(3):
@@ -49,17 +63,25 @@ class relpatchLoader(data.Dataset):
                 x2 = x1 + 64
                 y2 = y1 + 64
                 tile = img.crop((x1,y1,x2,y2))
+                tile = transforms.Lambda(rgb_jittering)(tile)
                 tile = transforms.ToTensor()(tile)
+                if self.dataset =='imagenet':
+                    pass
+                    # tile = transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])(tile)
+                elif self.dataset =='city':
+                    tile = transforms.Normalize(mean=[0.28689554, 0.32513303, 0.28389177],std=[0.18696375, 0.19017339, 0.18720214])(tile)
                 tiles.append(tile)
 
         img = transforms.ToTensor()(img)
-        lst = [0,1,2,3,5,6,7,8]
-        label = np.random.randint(len(lst))
-        indx = lst[np.random.randint(len(lst))]
+        label = np.random.randint(8)
+        indx = label
+        if indx > 3:
+            indx = indx + 1
+        # print(label,indx)
         tile1 = tiles[4]
         tile2 = tiles[indx]
         tileStack = torch.stack((tile1,tile2),0)
-        return tileStack, label
+        return tileStack, label, img
     
     def get_files(self,folder,extension_filter):
         files = []
@@ -89,13 +111,29 @@ class relpatchLoader(data.Dataset):
         else:
             raise RuntimeError("Unexpected dataset mode. Supported modes are: train, val and test")
 
+def rgb_jittering(im):
+    im = np.array(im,np.float32)
+    for ch in range(3):
+        thisRand = np.random.uniform(0.8, 1.2)
+        im[:,:,ch] *= thisRand
+    shiftVal = np.random.randint(0,6)
+    if np.random.randint(2) == 1:
+        shiftVal = -shiftVal
+    im += shiftVal
+    im = im.astype(np.uint8)
+    im = im.astype(np.float32)
+    return im
 
 if __name__ == "__main__":
-    import utils
     import matplotlib.pyplot as plt
-    train_set = relpatchLoader(root_dir="/home/ken/Documents/Dataset/", mode='val')
+    train_set = relpatchLoader(root_dir="/home/ken/Documents/Dataset/", mode='val',dataset='city')
     train_loader = data.DataLoader(train_set, batch_size=1, shuffle=False, num_workers=0)
-    img, tile1, tile2, label = iter(train_loader).next()
+    tileStack, label,img = iter(train_loader).next()
+    plt.imshow(transforms.ToPILImage(mode='RGB')(img.squeeze()))
+    plt.show()
+    tileStack = tileStack.squeeze()
+    tile1 = tileStack[0]
+    tile2 = tileStack[1]
     tile1 = transforms.ToPILImage(mode='RGB')(tile1.squeeze())
     tile2 = transforms.ToPILImage(mode='RGB')(tile2.squeeze())
     print(label)

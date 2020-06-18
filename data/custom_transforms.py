@@ -15,7 +15,6 @@ class Normalize(object):
         img = sample['image']
         mask = sample['label']
         img = np.array(img).astype(np.float32)
-        mask = np.array(mask).astype(np.float32)
         img /= 255.0
         img -= self.mean
         img /= self.std
@@ -227,8 +226,8 @@ class RandomTranslation(object):
     def __call__(self, sample):
         img = sample['image']
         mask = sample['label']
-        transX = random.randint(-4, 4) 
-        transY = random.randint(-4, 4)
+        transX = random.randint(-2, 2) 
+        transY = random.randint(-2, 2)
         img = ImageOps.expand(img, border=(transX,transY,0,0), fill=0)
         mask = ImageOps.expand(mask, border=(transX,transY,0,0), fill=255) #pad label filling with 255
         img = img.crop((0, 0, img.size[0]-transX, img.size[1]-transY))

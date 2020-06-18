@@ -49,7 +49,7 @@ def imshow_single(x,y):
     plt.imshow(y)
     plt.show()
     
-def save_checkpoint(model, optimizer, epoch, miou, val_miou, train_miou, val_loss, train_loss,lr_list, args):
+def save_checkpoint(model, optimizer, epoch, miou, val_miou, train_miou, val_loss, train_loss,lr_list, args, save_path):
     """Saves the model in a specified directory with a specified name.save
     Keyword arguments:
     - model (``nn.Module``): The model to save.
@@ -61,7 +61,7 @@ def save_checkpoint(model, optimizer, epoch, miou, val_miou, train_miou, val_los
     file in ``args.save_dir`` named "``args.name``_args.txt".
     """
     name = args.name
-    save_dir = args.save_dir
+    save_dir = save_path
     assert os.path.isdir(
         save_dir), "The directory \"{0}\" doesn't exist.".format(save_dir)
     # Save model
@@ -90,7 +90,7 @@ def save_checkpoint(model, optimizer, epoch, miou, val_miou, train_miou, val_los
         summary_file.write("Epoch: {0}\n". format(epoch))
         summary_file.write("Mean IoU: {0}\n". format(miou))
 
-def load_checkpoint(model, optimizer, folder_dir, filename,reset_optimizer=False):
+def load_checkpoint(model, optimizer, folder_dir, filename, reset_optimizer=False):
     
     assert os.path.isdir(
         folder_dir), "The directory \"{0}\" doesn't exist.".format(folder_dir)
@@ -203,15 +203,13 @@ class LongTensorToRGBPIL(object):
 
         return ToPILImage()(color_tensor)
         
-def get_modelparams(model):
+def freezeParams(model,cnt):
     model_params = []
     model_params.extend(model.parameters())
-    i=0
-    for param in model_params:
-        if i < 170:
+    for i, param in enumerate(model_params):
+        if i > cnt:
             param.requires_grad = False
-        i+=1
-    print('Number of Params: ',i)
+    
     return model_params
 
 def enet_weighing(dataloader, num_classes, c=1.02):

@@ -115,5 +115,9 @@ venv.bak/
 .vscode
 *.webm
 *.avi
+*.o
+*.npy
+run.sh
+
 
 save/*

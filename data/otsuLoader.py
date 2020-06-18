@@ -18,7 +18,6 @@ class otsuLoader(data.Dataset):
     def __init__(self, root_dir, mode='train'):
         self.root_dir = root_dir
         self.mode = mode
-        print('init: ',mode)
 
         if self.mode.lower() == 'train':
             self.train_data = self.get_files_train(folder=os.path.join(root_dir, self.train_folder),extension_filter=self.img_extension )

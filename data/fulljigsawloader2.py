@@ -7,7 +7,7 @@ import torch.utils.data as data
 from PIL import Image
 from torchvision import transforms
 
-class fulljigsawLoader(data.Dataset):
+class fulljigsawLoader2(data.Dataset):
     #dataset root folders
     train_folder = "ImageNet/train"
     val_folder = "ImageNet/val"
@@ -46,35 +46,29 @@ class fulljigsawLoader(data.Dataset):
 
         img = Image.open(data_path)
         img = img.convert('RGB')
-        img = img.resize((225,225))
-        # groundtruth = img
+        img = img.resize((960,960))
+        gt = transforms.ToTensor()(img)
         tiles = []
         for i in range(3):
             for j in range(3):
-                x1 = 0 + (75*j) + random.randint(0, 11)
-                y1 = 0 + (75*i) + random.randint(0, 11)
-                x2 = x1 + 64
-                y2 = y1 + 64
+                x1 = 0 + (320*i)
+                y1 = 0 + (320*j)
+                x2 = x1 + 320
+                y2 = y1 + 320
                 tile = img.crop((x1,y1,x2,y2))
+                # tile = transforms.RandomCrop(size=(512,512))(tile)
                 tile = transforms.ToTensor()(tile)
                 tiles.append(tile)
-        img = img.crop((0,0,224,224))
-        img = transforms.ToTensor()(img)
         tiles = torch.stack(tiles, 0)
         order = np.random.randint(len(self.permutations))
         perm = self.permutations[order]
         tiles = tiles[perm]
-        black1 = torch.zeros(3,64,10)
-        black2 = torch.zeros(3,10,212)
-        stack1 = torch.cat([tiles[0],black1,tiles[1],black1,tiles[2]],2)
-        stack2 = torch.cat([tiles[3],black1,tiles[4],black1,tiles[5]],2)
-        stack3 = torch.cat([tiles[6],black1,tiles[7],black1,tiles[8]],2)
-        shuffled = torch.cat([stack1,black2,stack2,black2,stack3],1)
-        shuffled = torch.nn.ZeroPad2d((6,6,6,6))(shuffled)
-        if self.include_extralabel:
-            return shuffled, order, img
-        else:
-            return shuffled, img
+        stack1 = torch.cat([tiles[0], tiles[1], tiles[2]], 2)
+        stack2 = torch.cat([tiles[3], tiles[4], tiles[5]], 2)
+        stack3 = torch.cat([tiles[6], tiles[7], tiles[8]], 2)
+        shuffled = torch.cat([stack1,stack2,stack3],1)
+        return shuffled, order, gt
+        
     
     def get_files(self,folder,extension_filter):
         files = []
@@ -114,16 +108,15 @@ class fulljigsawLoader(data.Dataset):
 if __name__ == "__main__":
     import utils
     import matplotlib.pyplot as plt
-    train_set = fulljigsawLoader(root_dir="/home/ken/Documents/Dataset/",perm_dir="/home/ken/Documents/Quad-S-Learning/data", mode='train')
+    train_set = fulljigsawLoader2(root_dir="/home/ken/Documents/Dataset/", mode='train')
     print(len(train_set))
     train_loader = data.DataLoader(train_set, batch_size=1, shuffle=False, num_workers=0)
-    shuffled, img = iter(train_loader).next()
-    print(img[0].size())
-    img = transforms.ToPILImage(mode='RGB')(img[0])
+    shuffled, order, gt = iter(train_loader).next()
+    gt = transforms.ToPILImage(mode='RGB')(gt[0])
     shuffled = transforms.ToPILImage(mode='RGB')(shuffled[0])
     
     plt.subplot(211)
-    plt.imshow(img)
+    plt.imshow(gt)
     plt.subplot(212)
     plt.imshow(shuffled)
     plt.show()

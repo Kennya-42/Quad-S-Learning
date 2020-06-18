@@ -8,9 +8,10 @@ from PIL import Image, ImageOps
 import numbers
 import math
 from torchvision import transforms
+import cv2
 # import torchvision.transforms.functional as F
 
-class Rotloader(data.Dataset):
+class simclrloader(data.Dataset):
     #dataset root folders
     train_folder = "ImageNet/train"
     val_folder = "ImageNet/val"
@@ -18,11 +19,10 @@ class Rotloader(data.Dataset):
     train_folder_city = 'cluster/city/train'
     val_folder_city = 'cluster/city/val'
     
-    def __init__(self, root_dir, mode='train', dataset='imagenet', include_extralabel=False):
+    def __init__(self, root_dir, mode='train', dataset='imagenet'):
         self.root_dir = root_dir
         self.mode = mode
         self.dataset = dataset
-        self.include_unrotated = include_extralabel
 
         if self.mode.lower() == 'train':
             if self.dataset =='imagenet':
@@ -47,37 +47,32 @@ class Rotloader(data.Dataset):
 
         img = Image.open(data_path)
         img = img.convert('RGB')
-        label = random.randint(0,3)
-        rot = 90
-        rot = rot*label
-        if self.dataset =='city':
-            if self.mode == 'train':
-                # transX = random.randint(-2, 2)
-                # transY = random.randint(-2, 2)
-                # img = ImageOps.expand(img, border=(transX,transY,0,0), fill=0)
-                # img = transforms.RandomCrop(size=(512,512))(img)
-                img = img.resize((224,224),Image.BILINEAR)
-            else:
-                # img = transforms.CenterCrop(size=(512,512))(img)
-                # img = transforms.RandomCrop(size=(512,512))(img)
-                img = img.resize((224,224),Image.BILINEAR)
-        # if self.mode == 'train':
-        #     color_jitter = transforms.ColorJitter(0.8, 0.8, 0.8, 0.2)
-        #     img = transforms.RandomApply([color_jitter], p=0.8)(img)
-        img_og = img    
-        img = transforms.functional.rotate(img, angle=rot)
-        img = transforms.ToTensor()(img)
-        # if self.dataset =='imagenet':
-        #     img = transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])(img)
-        # elif self.dataset =='city':
-        #     img = transforms.Normalize(mean=[0.28689554, 0.32513303, 0.28389177],std=[0.18696375, 0.19017339, 0.18720214])(img)
-        #     pass
+        if self.dataset == "city":
+            img = img.resize((1024,512),Image.BILINEAR)
+            img_og = transforms.ToTensor()(img)
+        elif self.dataset == "imagenet":
+            img = img.resize((256,256),Image.BILINEAR)
+        xis, xjs = img, img
+        xis, xjs = self.data_augment(xis), self.data_augment(xjs)
+        return xis, xjs, img_og
 
-        if self.include_unrotated:
-            img_og = transforms.ToTensor()(img_og)
-            return img, label, img_og
-        else:
-            return img, label
+    def data_augment(self, img):
+        w,h = 224,224
+        kernal_size = int(0.1 * h)
+        #kernal should be a odd number
+        if kernal_size%2 == 0:
+            kernal_size += 1
+        
+        color_jitter = transforms.ColorJitter(0.8, 0.8, 0.8, 0.2)
+        data_transforms = transforms.Compose([transforms.RandomResizedCrop(size=(h,w)),
+                                              transforms.RandomHorizontalFlip(),
+                                              transforms.RandomApply([color_jitter], p=0.8),
+                                              transforms.RandomGrayscale(p=0.2),
+                                              GaussianBlur(kernel_size=kernal_size),
+                                              transforms.ToTensor()])
+
+        img = data_transforms(img)
+        return img
     
     def get_files(self,folder,extension_filter):
         files = []
@@ -107,20 +102,6 @@ class Rotloader(data.Dataset):
             raise RuntimeError("Unexpected dataset mode. Supported modes are: train, val and test")
 
 class RandomErasing(object):
-    """ Randomly selects a rectangle region in an image and erases its pixels.
-        'Random Erasing Data Augmentation' by Zhong et al.
-        See https://arxiv.org/pdf/1708.04896.pdf
-    Args:
-         p: probability that the random erasing operation will be performed.
-         scale: range of proportion of erased area against input image.
-         ratio: range of aspect ratio of erased area.
-         value: erasing value. Default is 0. If a single int, it is used to
-            erase all pixels. If a tuple of length 3, it is used to erase
-            R, G, B channels respectively.
-            If a str of 'random', erasing each pixel with random values.
-         inplace: boolean to make this transform inplace. Default set to False.
-
-    """
 
     def __init__(self, p=0.5, scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0, inplace=False):
         assert isinstance(value, (numbers.Number, str, tuple, list))
@@ -139,16 +120,6 @@ class RandomErasing(object):
 
     @staticmethod
     def get_params(img, scale, ratio, value=0):
-        """Get parameters for ``erase`` for a random erasing.
-
-        Args:
-            img (Tensor): Tensor image of size (C, H, W) to be erased.
-            scale: range of proportion of erased area against input image.
-            ratio: range of aspect ratio of erased area.
-
-        Returns:
-            tuple: params (i, j, h, w, v) to be passed to ``erase`` for random erasing.
-        """
         img_c, img_h, img_w = img.shape
         area = img_h * img_w
 
@@ -186,14 +157,44 @@ class RandomErasing(object):
             img[:, x:x + h, y:y + w] = v
         return img
 
+class GaussianBlur(object):
+    # Implements Gaussian blur as described in the SimCLR paper
+    def __init__(self, kernel_size, min=0.1, max=2.0):
+        self.min = min
+        self.max = max
+        # kernel size is set to be 10% of the image height/width
+        self.kernel_size = kernel_size
+
+    def __call__(self, sample):
+        sample = np.array(sample)
+
+        # blur the image with a 50% chance
+        prob = np.random.random_sample()
+        prob = 0
+
+        if prob < 0.5:
+            sigma = (self.max - self.min) * np.random.random_sample() + self.min
+            sample = cv2.GaussianBlur(sample, (self.kernel_size, self.kernel_size), sigma)
+
+        return sample
+
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    train_set = Rotloader(root_dir="/home/ken/Documents/Dataset/", mode='train', dataset='city')
+    train_set = simclrloader(root_dir="/home/ken/Documents/Dataset/", mode='train', dataset='city')
     print('Dataset Size: ',len(train_set))
-    train_loader = data.DataLoader(train_set, batch_size=1, shuffle=False, num_workers=0)
-    timages, tlabels = iter(train_loader).next()
-    img = transforms.ToPILImage(mode='RGB')(timages[0])
-    print(tlabels[0].data.numpy())
-    print(img.size)
-    plt.imshow(img)
+    train_loader = data.DataLoader(train_set, batch_size=2, shuffle=False, num_workers=0)
+    xis, xjs, img_og = iter(train_loader).next()
+    xis = transforms.ToPILImage(mode='RGB')(xis[1])
+    xjs = transforms.ToPILImage(mode='RGB')(xjs[1])
+    img_og = transforms.ToPILImage(mode='RGB')(img_og[1])
+    xis.save('simclr2_transform1.png')
+    xjs.save('simclr2_transform2.png')
+    img_og.save('simclr2_original.png')
+    print(xis.size)
+    plt.subplot(311)
+    plt.imshow(img_og)
+    plt.subplot(312)
+    plt.imshow(xis)
+    plt.subplot(313)
+    plt.imshow(xjs)
     plt.show()

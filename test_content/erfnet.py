@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.init as init
 import torch.nn.functional as F
-import time
 
 class DownsamplerBlock (nn.Module):
     def __init__(self, ninput, noutput):
@@ -63,12 +62,12 @@ class Encoder(nn.Module):
 
         self.layers = nn.ModuleList()
 
-        self.layers.append(DownsamplerBlock(16,64)) #0
+        self.layers.append(DownsamplerBlock(16,64))
 
         for x in range(0, 5):    #5 times
            self.layers.append(non_bottleneck_1d(64, 0.1, 1))  
 
-        self.layers.append(DownsamplerBlock(64,128))#6
+        self.layers.append(DownsamplerBlock(64,128))
 
         for x in range(0, 2):    #2 times
             self.layers.append(non_bottleneck_1d(128, 0.1, 2))
@@ -119,20 +118,15 @@ class Decoder(nn.Module):
 class Classifier(nn.Module):
     def __init__(self, num_classes):
         super().__init__()
+        
         self.pool = nn.AdaptiveMaxPool2d((1, 1))
         self.l1 = nn.Linear(128, 128)
-        self.relu = nn.ReLU()
         self.l2 = nn.Linear(128, num_classes)
 
     def forward(self, input):
-        # print(input.size())
         output = self.pool(input)
-        # print(output.size())
         output = torch.flatten(output, 1)
-        # print(output.size())
         output = self.l1(output)
-        # print(output.size())
-        output = self.relu(output)
         output = self.l2(output)
         return output
 
@@ -165,15 +159,8 @@ class ERFNet(nn.Module):
             return output
 
 if __name__ == "__main__":
-    model = ERFNet(20,classify=True).cuda()
-    # encoder = model.encoder
-    # for param in encoder.parameters():
-    #     print(param.data[0].pow(2).sum())
-    #     exit()
+    model = ERFNet(4,classify=True)
     model.eval()
-    with torch.no_grad():
-        input = torch.rand(1, 3, 224, 224).cuda()
-        start = time.time()
-        output = model(input)
-        print(time.time()-start)
-        print(output.size())
+    input = torch.rand(2, 3, 224, 224)
+    output = model(input)
+    print(output.size())

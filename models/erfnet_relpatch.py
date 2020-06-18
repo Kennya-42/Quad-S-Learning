@@ -83,7 +83,7 @@ class Encoder(nn.Module):
         return output
 
 class ERFNet(nn.Module):
-    def __init__(self, encoder=None,num_classes=1000):  #use encoder to pass pretrained encoder
+    def __init__(self, encoder=None,num_classes=8):  #use encoder to pass pretrained encoder
         super().__init__()
         if (encoder == None):
             self.encoder = Encoder()
@@ -101,20 +101,23 @@ class ERFNet(nn.Module):
         self.fc7.add_module('drop7',nn.Dropout(p=0.5))
 
         self.classifier = nn.Sequential()
-        self.classifier.add_module('fc8',nn.Linear(4096, num_classes))
-        #self.classifier.add_module('softmax',nn.Softmax())
+        self.classifier.add_module('fc8',nn.Linear(4096, 4096))
+        self.classifier.add_module('relu8',nn.ReLU(inplace=True))
+        self.classifier.add_module('drop8',nn.Dropout(p=0.5))
+        self.classifier.add_module('fc9',nn.Linear(4096, num_classes))
         
 
     def forward(self, input):
         B,T,C,H,W = input.size()
         x = input.transpose(0,1)
         x_list = []
+        #each patch goes thru the encoders and fc6
         for i in range(T):
             z = self.encoder(x[i])
             z = self.fc6(z.view(B,-1))
             z = z.view([B,1,-1])
             x_list.append(z)
-
+        #cat each feature vector from patch 1 and 2
         x = torch.cat(x_list,1)
         x = self.fc7(x.view(B,-1))
         output = self.classifier(x)
@@ -123,8 +126,8 @@ class ERFNet(nn.Module):
         return output
 
 if __name__ == "__main__":
-    model = ERFNet()
+    model = ERFNet(num_classes=8)
     model.eval()
-    input = torch.rand(2, 9, 3, 64, 64)
+    input = torch.rand(2, 2, 3, 64, 64)
     output = model(input)
     print(output.size())

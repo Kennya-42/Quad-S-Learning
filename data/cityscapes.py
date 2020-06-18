@@ -1,6 +1,8 @@
 import torchvision.transforms.functional as TF
-from . import custom_transforms as tr
-from . import utils
+if __name__ != "__main__":
+    from . import custom_transforms as tr
+    from . import utils
+
 from torchvision import transforms
 from collections import OrderedDict
 import torch.utils.data as data
@@ -48,12 +50,13 @@ class Cityscapes(data.Dataset):
             ('unlabeled', (0, 0, 0))
     ])
 
-    def __init__(self, root_dir, mode='train', loader=pil_loader,height=1024, width=2048):
+    def __init__(self, root_dir, mode='train', loader=pil_loader,height=1024, width=2048, num_train=-1):
         self.root_dir = root_dir
         self.mode = mode
         self.loader = loader
         self.height = height
         self.width = width
+        self.num_train = num_train
 
         if self.mode.lower() == 'train':
             # Get the training data and labels filepaths
@@ -69,6 +72,10 @@ class Cityscapes(data.Dataset):
             self.test_labels = utils.get_files(os.path.join(root_dir, self.test_lbl_folder),name_filter=self.lbl_name_filter,extension_filter=self.img_extension)
         else:
             raise RuntimeError("Unexpected dataset mode. Supported modes are: train, val and test")
+
+        if self.num_train > 0:
+            self.train_data = self.train_data[:self.num_train]
+            self.train_labels = self.train_labels[:self.num_train]
 
     def __getitem__(self, index):
         if self.mode.lower() == 'train':
@@ -99,7 +106,7 @@ class Cityscapes(data.Dataset):
     def transform_tr(self,input):
         composed_transforms = transforms.Compose([
             tr.RandomHorizontalFlip(),
-            tr.RandomCrop(self.width, self.height),
+            # tr.RandomCrop(self.width, self.height),
             tr.Resize((self.width, self.height)),
             tr.RandomTranslation(),
             tr.ToTensor()
@@ -130,11 +137,12 @@ if __name__ == "__main__":
     import utils
     import custom_transforms as tr
     import matplotlib.pyplot as plt
-    train_set = Cityscapes(root_dir="/home/ken/Documents/Dataset/", mode='train',height=512, width=1024)
-    train_loader = data.DataLoader(train_set, batch_size=1, shuffle=False, num_workers=0)
+    train_set = Cityscapes(root_dir="/home/ken/Documents/Dataset/", mode='train',height=512, width=1024,num_train=500)
+    train_loader = data.DataLoader(train_set, batch_size=1, shuffle=True, num_workers=0)
+    print(len(train_loader))
     timages, tlabels = iter(train_loader).next()
-    plt.imshow(tlabels.squeeze())
-    plt.show()
+    print(torch.unique(tlabels))
+    
     img = transforms.ToPILImage(mode='RGB')(timages[0])
     label = utils.LongTensorToRGBPIL(None)(tlabels.squeeze())
     f, axarr = plt.subplots(1,2)

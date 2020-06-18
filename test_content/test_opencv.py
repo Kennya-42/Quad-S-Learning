@@ -13,10 +13,39 @@ import time
 import re
 import hdbscan
 
-train_folder = "ImageNet/train"
-val_folder = "ImageNet/val"
-img_extension = '.JPEG'
+train_folder = "Cityscapes/leftImg8bit/train"
+train_lbl_folder = "Cityscapes/gtFine/train"
+test_folder = 'cluster/city/val'
+val_folder = "Cityscapes/leftImg8bit/val"
+val_lbl_folder = "Cityscapes/gtFine/val"
+img_extension = '.png'
+lbl_name_filter = 'labelTrainIds'
 root_dir="/home/ken/Documents/Dataset/"
+
+def get_files_train_city(folder, name_filter=None, extension_filter=None):
+    
+    if not os.path.isdir(folder):
+        raise RuntimeError("\"{0}\" is not a folder.".format(folder))
+    
+    if name_filter is None:
+        name_cond = lambda filename: True
+    else:
+        name_cond = lambda filename: name_filter in filename
+
+    if extension_filter is None:
+        ext_cond = lambda filename: True
+    else:
+        ext_cond = lambda filename: filename.endswith(extension_filter)
+
+    filtered_files = []
+    for path, _, files in os.walk(folder):
+        files.sort()
+        for file in files:
+            if name_cond(file) and ext_cond(file):
+                full_path = os.path.join(path, file)
+                filtered_files.append(full_path)
+    
+    return filtered_files
 
 def get_files_test(folder,extension_filter):
     files = []
@@ -36,17 +65,20 @@ def get_files_val(folder,extension_filter):
     return files
 
 if __name__ == "__main__":
-    # files = get_files_test(folder=os.path.join(root_dir, train_folder),extension_filter=img_extension)
-    files = get_files_val(folder=os.path.join(root_dir, val_folder),extension_filter=img_extension)
+    # files = get_files_train_city(folder=os.path.join(root_dir, train_folder),extension_filter=img_extension)
+    files = get_files_val(folder=os.path.join(root_dir, test_folder),extension_filter=img_extension)
     print('Num Files: ', len(files) )
+    
     print('Running clustering....')
-    i = 0
-    num_fail = 0
-    for file in tqdm(files):
+    for i, file in enumerate(tqdm(files)):
+        # if i < 18348:
+        #     continue
         img_original = Image.open(file).convert('RGB')
-        img = img_original.resize((112,112),resample=PIL.Image.BICUBIC)
+        # img = img_original
+        # print(file)
+        img = img_original.resize((512,1024),resample=PIL.Image.BICUBIC)
         img = np.array(img)
-
+        # 
         try:
             imgflat = np.reshape(img,(-1,3))
         except:
@@ -54,39 +86,34 @@ if __name__ == "__main__":
             print(img.shape)
             exit()
         imgflat = imgflat - imgflat.mean()
-        # bandwidth = cluster.estimate_bandwidth(imgflat,quantile=0.2,n_jobs=-1)
-        # bandwidth = 25
-        # clt = cluster.MeanShift(bandwidth=bandwidth,bin_seeding=True,max_iter=1000,n_jobs=-1)
-        clt = cluster.KMeans(n_clusters=4,max_iter=1000,n_jobs=-1,precompute_distances=True,tol=1e-4)
-        # clt = cluster.AgglomerativeClustering(n_clusters=None,distance_threshold=5000,linkage='ward')
-        # clt = hdbscan.HDBSCAN(min_cluster_size=50,min_samples=25)
+        clt = cluster.KMeans(n_clusters=10,max_iter=500,n_init=20,n_jobs=-1,precompute_distances=True,tol=1e-4)
         labels = clt.fit_predict(imgflat)  
-        # labels = np.ones((64*64)) 
+        labels2 = clt.fit_predict(imgflat)  
         # labels[labels == 255] = 0     
         # labels += 1
         # num_uniqueLables = np.unique(labels)
         # print(num_uniqueLables)
         # print(np.max(num_uniqueLables))
-        labels = np.reshape(labels,(112,112)).astype(np.uint8)
+        labels = np.reshape(labels,(1024,512)).astype(np.uint8)
         labels = Image.fromarray(labels)
-        labels = labels.resize((224,224),resample=PIL.Image.NEAREST)
-        x = re.split("/home/ken/Documents/Dataset/ImageNet/val/ILSVRC2012_val_(.+).JPEG", file, 1)
+        labels = labels.resize((2048,1024),resample=PIL.Image.NEAREST)
+        labels2 = np.reshape(labels2,(1024,512)).astype(np.uint8)
+        labels2 = Image.fromarray(labels2)
+        labels2 = labels2.resize((2048,1024),resample=PIL.Image.NEAREST)
+        x = re.split("/home/ken/Documents/Dataset/cluster/city/val/(.+)", file, 1)
         filename = x[1]
-        savepath = root_dir + 'kmeans/val/' + filename + '.png'
+        savepath = root_dir + 'cluster/kmeans/extra_city/' + filename
         # print(savepath)
-        labels.save(savepath)
-        
-        # if num_uniqueLables <=1 or num_uniqueLables > 10:
-        #     num_fail += 1
+        # labels.save(savepath)
 
-        # plt.subplot(121)
-        # plt.imshow(img_original)
-        # plt.subplot(122)
-        # plt.imshow(labels)
-        # plt.show()
-        # if i >0:
-        #     break
-        # i += 1
+        plt.subplot(311)
+        plt.imshow(img_original)
+        plt.subplot(312)
+        plt.imshow(labels)
+        plt.subplot(313)
+        plt.imshow(labels2)
+        plt.show()
+        exit()
+        
 
     print('Done clustering....')
-    print('num failed: ',num_fail)

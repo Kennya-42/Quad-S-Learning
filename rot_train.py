@@ -2,7 +2,6 @@ from data import Rotloader as dataset
 from models.erfnet import ERFNet
 import torch.nn as nn
 from train import Train
-from lr_scheduler import Cust_LR_Scheduler
 import torch.utils.data as data
 import torch.optim as optim
 from torch.autograd import Variable
@@ -10,19 +9,25 @@ import torch
 import math
 import argparse
 from path import get_root_path
+import os
+# os.environ['cuda_launch_blocking'] = '1'
+
 
 ROOT_PATH = get_root_path()
 DATASET_DIR = ROOT_PATH + "/Documents/Dataset/"
-SAVE_PATH = ROOT_PATH + '/Documents/Quad-S-Learning/save/'
-LEARNING_RATE = 0.00005
-NUM_EPOCHS = 200
-BATCH_SIZE = 20 
-NUM_WORKERS = 20
+ENCODER_PATH = ROOT_PATH + '/Documents/Quad-S-Learning/save/classification/'
+SAVE_PATH = ROOT_PATH + '/Documents/Quad-S-Learning/save/rotation/'
 
 parser = argparse.ArgumentParser()
-parser.add_argument( "--resume", action='store_true')
 parser.add_argument( "--premode",           choices=['none', 'imagenet'], default='imagenet')
-parser.add_argument( "--pretrain-name",  type=str, default='erfnet_encoder.pth')
+parser.add_argument( "--batch-size",     type=int,   default=64)
+parser.add_argument( "--workers",        type=int,   default=12)
+parser.add_argument( "--epochs",         type=int,   default=150)
+parser.add_argument( "--learning-rate",  type=float, default=0.0005)
+parser.add_argument( "--dataset",           choices=['imagenet', 'city'], default='city')
+parser.add_argument( "--weight-decay",   type=float, default=1e-4)
+parser.add_argument( "--pretrain-name",  type=str, default='erfnet_class_imgnet.pth')
+parser.add_argument( "--name",  type=str, default='erfnet_enc_rot_city_noaug')
 args = parser.parse_args()
 
 class accuracy():
@@ -38,14 +43,13 @@ class accuracy():
         acc = self.num_correct / self.total
         return acc
                                  
-def run_train_epoch(epoch,model,criterion,optimizer,lr_updater,data_loader):
+def run_train_epoch(epoch,model,criterion,optimizer,data_loader):
     epoch_loss = 0.0
     model.train()
     metric = accuracy()
     for step, batch_data in enumerate(data_loader):
         inputs, labels = batch_data     
         inputs, labels = Variable(inputs).cuda(), Variable(labels).cuda()
-        lr_updater(optimizer, step, epoch)
         #Forward Propagation
         outputs = model(inputs)
         # Loss computation
@@ -56,13 +60,13 @@ def run_train_epoch(epoch,model,criterion,optimizer,lr_updater,data_loader):
         optimizer.step()
         # Keep track of loss for current epoch
         epoch_loss += loss.item()
-        metric.update(outputs,labels)
+        metric.update(outputs, labels)
+        # print(step,' iter loss: ', loss.item(), 'total loss: ', epoch_loss, 'ACC: ', metric.get_accuracy())
 
-    acc = metric.get_accuracy()
     epoch_loss = epoch_loss / len(data_loader)
     return epoch_loss , metric.get_accuracy()
 
-def run_val_epoch(epoch,model,criterion,optimizer,lr_updater,data_loader):
+def run_val_epoch(epoch,model,criterion,optimizer,data_loader):
     epoch_loss = 0.0
     model.eval()
     metric = accuracy()
@@ -76,9 +80,8 @@ def run_val_epoch(epoch,model,criterion,optimizer,lr_updater,data_loader):
             loss = criterion(outputs, labels)
             # Keep track of loss for current epoch
             epoch_loss += loss.item()
-            metric.update( outputs, labels)
+            metric.update(outputs, labels)
 
-    acc = metric.get_accuracy()
     epoch_loss = epoch_loss / len(data_loader)
     return epoch_loss , metric.get_accuracy()
 
@@ -91,7 +94,7 @@ def save_model(model, optimizer, model_path,epoch,val_acc):
         
     torch.save(checkpoint, model_path)
 
-    summary_filename = SAVE_PATH+'Rotation/erfnet_rot_summary.txt'
+    summary_filename = SAVE_PATH + args.name + '_summary.txt'
     with open(summary_filename, 'w') as summary_file:
         sorted_args = sorted(vars(args))
         summary_file.write("ARGUMENTS\n")
@@ -104,43 +107,52 @@ def save_model(model, optimizer, model_path,epoch,val_acc):
     
 def main():
     #Prepare Data
-    train_set = dataset(root_dir=DATASET_DIR, mode='train')
-    train_loader = data.DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
-    val_set = dataset(root_dir=DATASET_DIR, mode='val')
-    val_loader = data.DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
+    train_set = dataset(root_dir=DATASET_DIR, mode='train',dataset=args.dataset)
+    train_loader = data.DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.workers)
+    val_set = dataset(root_dir=DATASET_DIR, mode='val',dataset=args.dataset)
+    val_loader = data.DataLoader(val_set, batch_size=args.batch_size, shuffle=False, num_workers=args.workers)
+    timages, tlabels = iter(train_loader).next()
+    print('training on: ', args.dataset)
+    print('initialized on: ',args.premode)
+    print('train set size: ',len(train_set))
+    print('val set size: ',len(val_set))
+    print("Number of epochs: ", args.epochs)
+    print("Train Image size:", timages.size())
+    print("Train Label size:", tlabels.size())
     #Load Model
     if args.premode == 'none':
         pretrainedEnc = None
     elif args.premode == 'imagenet':
         print("Loading encoder pretrained on imagenet classification")
         pretrained = ERFNet(1000,classify=True)
-        checkpnt = torch.load(SAVE_PATH+'Classification/' + args.pretrain_name)
+        checkpnt = torch.load(ENCODER_PATH + args.pretrain_name)
         print("Loading: ",args.pretrain_name)
         pretrained.load_state_dict(checkpnt['state_dict'])
         pretrainedEnc = pretrained.encoder
 
-    model = ERFNet(num_classes=4,classify=True,encoder=pretrainedEnc).cuda()
-    model_path = SAVE_PATH+'Rotation/erfnet_encoder_rot.pth'
+    model = ERFNet(num_classes=4, classify = True, encoder=pretrainedEnc).cuda()
+    model_path = SAVE_PATH + args.name + '.pth'
+    print('savename: ',args.name)
     criterion = nn.CrossEntropyLoss().cuda()
-    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.999), eps=1e-08, weight_decay=1e-4)
-    lr_updater = Cust_LR_Scheduler(mode='poly', base_lr=LEARNING_RATE, num_epochs=NUM_EPOCHS,iters_per_epoch=len(train_loader))
+    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, betas=(0.9, 0.999), eps=1e-08, weight_decay=args.weight_decay)
+    # optimizer = optim.SGD(model.parameters(), lr=args.learning_rate, momentum=0.9, weight_decay=args.weight_decay)
+    lambda1 = lambda epoch: pow((1-((epoch-1)/args.epochs)),0.9)
+    lr_updater = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda1)
     best_val_acc = 0
-    for epoch in range(0, NUM_EPOCHS):
-        print(">> [Epoch: {0:d}] Training LR: {1:.8f}".format(epoch,lr_updater.get_LR(epoch)))
-
-        epoch_loss, train_acc = run_train_epoch(epoch, model, criterion, optimizer, lr_updater, train_loader)
-
+    for epoch in range(args.epochs):
+        print(">> [Epoch: {0:d}] Training LR: {1:.8f}".format(epoch,lr_updater.get_lr()[0]))
+        epoch_loss, train_acc = run_train_epoch(epoch, model, criterion, optimizer, train_loader)
         print(">> Epoch: %d | Loss: %2.4f | Train Acc: %2.4f" %(epoch,epoch_loss,train_acc))
 
-        val_loss, val_acc = run_val_epoch(epoch, model, criterion, optimizer, lr_updater, val_loader)
-
+        val_loss, val_acc = run_val_epoch(epoch, model, criterion, optimizer, val_loader)
         print(">>>> Val Epoch: %d | Loss: %2.4f | Val Acc: %2.4f" %(epoch, val_loss, val_acc))
+        lr_updater.step(epoch)
         
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             print('saving best model')
             save_model(model, optimizer, model_path,epoch,val_acc)
-
+    print(best_val_acc)
 
 if __name__ == '__main__':
     main()

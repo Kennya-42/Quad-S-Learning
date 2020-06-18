@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.init as init
 import torch.nn.functional as F
-import time
 
 class DownsamplerBlock (nn.Module):
     def __init__(self, ninput, noutput):
@@ -63,12 +62,12 @@ class Encoder(nn.Module):
 
         self.layers = nn.ModuleList()
 
-        self.layers.append(DownsamplerBlock(16,64)) #0
+        self.layers.append(DownsamplerBlock(16,64))
 
         for x in range(0, 5):    #5 times
            self.layers.append(non_bottleneck_1d(64, 0.1, 1))  
 
-        self.layers.append(DownsamplerBlock(64,128))#6
+        self.layers.append(DownsamplerBlock(64,128))
 
         for x in range(0, 2):    #2 times
             self.layers.append(non_bottleneck_1d(128, 0.1, 2))
@@ -119,43 +118,29 @@ class Decoder(nn.Module):
 class Classifier(nn.Module):
     def __init__(self, num_classes):
         super().__init__()
-        self.pool = nn.AdaptiveMaxPool2d((1, 1))
-        self.l1 = nn.Linear(128, 128)
-        self.relu = nn.ReLU()
-        self.l2 = nn.Linear(128, num_classes)
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.linear = nn.Linear(128, num_classes)
 
     def forward(self, input):
-        # print(input.size())
-        output = self.pool(input)
-        # print(output.size())
+        output = self.avgpool(input)
         output = torch.flatten(output, 1)
-        # print(output.size())
-        output = self.l1(output)
-        # print(output.size())
-        output = self.relu(output)
-        output = self.l2(output)
+        output = self.linear(output)
         return output
 
 
 class ERFNet(nn.Module):
-    def __init__(self, num_classes, encoder=None, classify=False, decoder=None):  #use encoder to pass pretrained encoder
+    def __init__(self, num_classes_dec=20, num_classes_enc=4, encoder=None):  #use encoder to pass pretrained encoder
         super().__init__()
-        self.classify = classify
-        if classify:
-            self.classifier = Classifier(num_classes)
-        else:
-            if (decoder == None):
-                self.decoder = Decoder(num_classes)
-            else:
-                self.decoder = decoder
-
         if (encoder == None):
             self.encoder = Encoder()
         else:
             self.encoder = encoder
 
-    def forward(self, input):
-        if self.classify:
+        self.classifier = Classifier(num_classes_enc)
+        self.decoder = Decoder(num_classes_dec)
+
+    def forward(self, input, mode='full'):
+        if mode=='classify':
             output = self.encoder(input)
             output = self.classifier(output)
             return output
@@ -165,15 +150,10 @@ class ERFNet(nn.Module):
             return output
 
 if __name__ == "__main__":
-    model = ERFNet(20,classify=True).cuda()
-    # encoder = model.encoder
-    # for param in encoder.parameters():
-    #     print(param.data[0].pow(2).sum())
-    #     exit()
+    model = ERFNet(num_classes_dec=20,num_classes_enc=4,encoder=None)
     model.eval()
-    with torch.no_grad():
-        input = torch.rand(1, 3, 224, 224).cuda()
-        start = time.time()
-        output = model(input)
-        print(time.time()-start)
-        print(output.size())
+    input = torch.rand(2, 3, 256, 256)
+    classify = model(input,mode='classify')
+    seg = model(input,mode='full')
+    print(classify.size())
+    print(seg.size())

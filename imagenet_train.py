@@ -2,7 +2,6 @@ from data import Imagenet as dataset
 from models.erfnet import ERFNet
 import torch.nn as nn
 from train import Train
-from lr_scheduler import Cust_LR_Scheduler
 import torch.utils.data as data
 import torch.optim as optim
 from torch.autograd import Variable
@@ -12,14 +11,15 @@ from path import get_root_path
 
 ROOT_PATH = get_root_path()
 DATASET_DIR = ROOT_PATH + "/Documents/Dataset/"
-SAVE_PATH = ROOT_PATH + '/Documents/Quad-S-Learning/save/'
-LEARNING_RATE = 0.00005
-NUM_EPOCHS = 200
-BATCH_SIZE = 20 
-NUM_WORKERS = 20
+SAVE_PATH = ROOT_PATH + '/Documents/Quad-S-Learning/save/classification/'
 
 parser = argparse.ArgumentParser()
 parser.add_argument( "--resume", action='store_true')
+parser.add_argument( "--batch-size",     type=int,   default=40)
+parser.add_argument( "--workers",        type=int,   default=0)
+parser.add_argument( "--epochs",         type=int,   default=150)
+parser.add_argument( "--learning-rate",  type=float, default=0.0005)
+parser.add_argument( "--savename",           type=str, default='erfnet_simclr_imagenet.pth')
 args = parser.parse_args()
 
 class accuracy():
@@ -35,17 +35,13 @@ class accuracy():
         acc = self.num_correct / self.total
         return acc
                                  
-def run_train_epoch(epoch,model,criterion,optimizer,lr_updater,data_loader):
+def run_train_epoch(epoch, model, criterion, optimizer, data_loader):
     epoch_loss = 0.0
     model.train()
     metric = accuracy()
-    start = torch.cuda.Event(enable_timing=True)
-    end = torch.cuda.Event(enable_timing=True)
-    start.record()
     for step, batch_data in enumerate(data_loader):
         inputs, labels = batch_data     
         inputs, labels = Variable(inputs).cuda(), Variable(labels).cuda()
-        lr_updater(optimizer, step, epoch)
         #Forward Propagation
         outputs = model(inputs)
         # Loss computation
@@ -56,15 +52,12 @@ def run_train_epoch(epoch,model,criterion,optimizer,lr_updater,data_loader):
         optimizer.step()
         # Keep track of loss for current epoch
         epoch_loss += loss.item()
-        metric.update(outputs,labels)
+        metric.update(outputs, labels)
 
     epoch_loss = epoch_loss / len(data_loader)
-    end.record()
-    torch.cuda.synchronize()
-    print(start.elapsed_time(end)) #time in milliseconds
     return epoch_loss , metric.get_accuracy()
 
-def run_val_epoch(epoch,model,criterion,optimizer,data_loader):
+def run_val_epoch(epoch, model, criterion, optimizer, data_loader):
     epoch_loss = 0.0
     model.eval()
     metric = accuracy()
@@ -78,12 +71,12 @@ def run_val_epoch(epoch,model,criterion,optimizer,data_loader):
             loss = criterion(outputs, labels)
             # Keep track of loss for current epoch
             epoch_loss += loss.item()
-            metric.update( outputs.cpu(), labels.cpu())
+            metric.update( outputs, labels)
 
     epoch_loss = epoch_loss / len(data_loader)
     return epoch_loss , metric.get_accuracy()
 
-def save_model(model, optimizer, model_path,epoch,val_acc):
+def save_model(model, optimizer, model_path, epoch, val_acc):
     checkpoint = {
         'epoch':epoch,
         'val_acc':val_acc,
@@ -92,7 +85,7 @@ def save_model(model, optimizer, model_path,epoch,val_acc):
         
     torch.save(checkpoint, model_path)
 
-    summary_filename = SAVE_PATH+'Classification/erfnet_encoder_summary.txt'
+    summary_filename = SAVE_PATH + args.savename + '_summary.txt'
     with open(summary_filename, 'w') as summary_file:
         sorted_args = sorted(vars(args))
         summary_file.write("ARGUMENTS\n")
@@ -105,40 +98,45 @@ def save_model(model, optimizer, model_path,epoch,val_acc):
     
 def main():
     train_set = dataset(root_dir=DATASET_DIR, mode='train')
-    train_loader = data.DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
+    train_loader = data.DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.workers)
     val_set = dataset(root_dir=DATASET_DIR, mode='val')
-    val_loader = data.DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
-    model = ERFNet(num_classes=1000,classify=True).cuda()
-    model_path = SAVE_PATH + 'Classification/erfnet_encoder.pth'
+    val_loader = data.DataLoader(val_set, batch_size=args.batch_size, shuffle=False, num_workers=args.workers)
+    print('train set size: ',len(train_set))
+    print("Number of epochs: ", args.epochs)
+    print('batch size: ',args.batch_size)
+    print('learning Rate:', args.learning_rate)
+    model = ERFNet(num_classes=1000, classify=True).cuda()
+    model_path = SAVE_PATH + args.savename
     criterion = nn.CrossEntropyLoss().cuda()
-    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.999), eps=1e-08, weight_decay=1e-4)
-    lr_updater = Cust_LR_Scheduler(mode='poly', base_lr=LEARNING_RATE, num_epochs=NUM_EPOCHS,iters_per_epoch=len(train_loader))
-    best_val_acc = 0
-    start_epoch = 0
+    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, betas=(0.9, 0.999), eps=1e-08, weight_decay=1e-4)
+    lambda1 = lambda epoch: pow((1-((epoch-1)/args.epochs)),0.9)
+    lr_updater = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda1)
+
     if args.resume:
-        checkpoint = torch.load(SAVE_PATH+'Classification/erfnet_encoder.pth')
-        model.load_state_dict(checkpoint['state_dict'])
+        print('resuming from checkpoint')
+        checkpoint = torch.load(SAVE_PATH + args.savename)
         optimizer.load_state_dict(checkpoint['optimizer'])
         start_epoch = checkpoint['epoch']
+        model.load_state_dict(checkpoint['state_dict'])
         best_val_acc = checkpoint['val_acc']
-        print('resuming on epoch: ',start_epoch)
-        print('best val acc: ',best_val_acc)
-        
-    for epoch in range(start_epoch, NUM_EPOCHS):
-        print(">> [Epoch: {0:d}] Training LR: {1:.8f}".format(epoch,lr_updater.get_LR(epoch)))
+        print('start epoch: ', start_epoch, 'best val acc:', best_val_acc) 
+    else:
+        start_epoch = 0                                             
+        best_val_acc = 0
 
-        epoch_loss, train_acc = run_train_epoch(epoch, model, criterion, optimizer, lr_updater, train_loader)
-
-        print(">> Epoch: %d | Loss: %2.4f | Train Acc: %2.4f" %(epoch,epoch_loss,train_acc))
-
+    for epoch in range(start_epoch,args.epochs):
+        print(">> [Epoch: {0:d}] Training LR: {1:.8f}".format(epoch, lr_updater.get_lr()[0]))
+        epoch_loss, train_acc = run_train_epoch(epoch, model, criterion, optimizer, train_loader)
+        print(">> Epoch: %d | Loss: %2.4f | Train Acc: %2.4f" %(epoch, epoch_loss, train_acc))
         val_loss, val_acc = run_val_epoch(epoch, model, criterion, optimizer, val_loader)
-
         print(">>>> Val Epoch: %d | Loss: %2.4f | Val Acc: %2.4f" %(epoch, val_loss, val_acc))
+        lr_updater.step(epoch)
         
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             print('saving best model')
-            save_model(model, optimizer, model_path,epoch,val_acc)
+            save_model(model, optimizer, model_path, epoch, val_acc)
+    print(best_val_acc)
 
 
 if __name__ == '__main__':

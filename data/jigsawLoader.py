@@ -2,31 +2,36 @@ import os
 import glob
 import torch
 import random
-import PIL
 import numpy as np
-# from . import utils
 import torch.utils.data as data
 from PIL import Image, ImageOps
 from torchvision import transforms
-
-from collections import OrderedDict
-import torchvision.transforms.functional as TF
 
 class jigsawLoader(data.Dataset):
     #dataset root folders
     train_folder = "ImageNet/train"
     val_folder = "ImageNet/val"
     img_extension = '.JPEG'
+    train_folder_city = 'cluster/city/train'
+    val_folder_city = 'cluster/city/val'
     
-    def __init__(self, root_dir, mode='train'):
+    def __init__(self, root_dir, mode='train', dataset='imagenet'):
         self.root_dir = root_dir
+        self.perm_dir = root_dir[:-8] + 'Quad-S-Learning/data/permutations_1000.npy'
         self.mode = mode
         self.permutations = self.__retrive_permutations(1000)
+        self.dataset = dataset
 
         if self.mode.lower() == 'train':
-            self.train_data = self.get_files(folder=os.path.join(root_dir, self.train_folder),extension_filter=self.img_extension )
+            if self.dataset =='imagenet':
+                self.train_data = self.get_files(folder=os.path.join(root_dir, self.train_folder),extension_filter=self.img_extension)#[:50000]
+            elif self.dataset =='city':
+                self.train_data = self.get_files_val(folder=os.path.join(root_dir, self.train_folder_city),extension_filter='.png')
         elif self.mode.lower() == 'val':
-            self.val_data = self.get_files_val(folder=os.path.join(root_dir, self.val_folder),extension_filter=self.img_extension)
+            if self.dataset =='imagenet':
+                self.val_data = self.get_files_val(folder=os.path.join(root_dir, self.val_folder),extension_filter=self.img_extension)
+            elif self.dataset =='city':
+                self.val_data = self.get_files_val(folder=os.path.join(root_dir, self.val_folder_city),extension_filter='.png')
         else:
             raise RuntimeError("Unexpected dataset mode. Supported modes are: train, val")
 
@@ -40,7 +45,19 @@ class jigsawLoader(data.Dataset):
 
         img = Image.open(data_path)
         img = img.convert('RGB')
-        img = img.resize((225,225))
+        if self.dataset == 'imagenet':
+            img = transforms.RandomHorizontalFlip(p=0.5)(img)
+            img = img.resize((360,360),Image.BILINEAR)
+            img = transforms.CenterCrop(255)(img)
+        elif self.dataset == 'city':
+            pass
+            #resize 256, 255 center crop
+            img = transforms.RandomHorizontalFlip(p=0.5)(img)
+            transX = random.randint(-2, 2) 
+            transY = random.randint(-2, 2)
+            img = ImageOps.expand(img, border=(transX,transY,0,0), fill=0)
+            img = transforms.RandomCrop(size=(1000,2000))(img)
+            img = img.resize((225,225),Image.BILINEAR)
         tiles = []
         for i in range(3):
             for j in range(3):
@@ -49,7 +66,15 @@ class jigsawLoader(data.Dataset):
                 x2 = x1 + 64
                 y2 = y1 + 64
                 tile = img.crop((x1,y1,x2,y2))
+                # tile = transforms.Lambda(rgb_jittering)(tile)
                 tile = transforms.ToTensor()(tile)
+                if self.dataset =='imagenet':
+                    pass
+                    # tile = transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])(tile)
+                elif self.dataset =='city':
+                    tile = transforms.Normalize(mean=[0.28689554, 0.32513303, 0.28389177],std=[0.18696375, 0.19017339, 0.18720214])(tile)
+                # m, s = tile.view(3, -1).mean(dim=1).numpy(), tile.view(3, -1).std(dim=1).numpy()
+                # tile = transforms.Normalize(mean=m.tolist(), std=s.tolist())(tile)
                 tiles.append(tile)
 
         img = transforms.ToTensor()(img)
@@ -57,7 +82,7 @@ class jigsawLoader(data.Dataset):
         order = np.random.randint(len(self.permutations))
         perm = self.permutations[order]
         tiles = tiles[perm]
-        return tiles, order
+        return tiles, order, img
     
     def get_files(self,folder,extension_filter):
         files = []
@@ -87,19 +112,33 @@ class jigsawLoader(data.Dataset):
             raise RuntimeError("Unexpected dataset mode. Supported modes are: train, val and test")
 
     def __retrive_permutations(self, classes):
-        all_perm = np.load('/home/ken/Documents/Quad-S-Learning/data/permutations_1000.npy')
-        # from range [1,9] to [0,8]
+        all_perm = np.load(self.perm_dir)
         if all_perm.min() == 1:
             all_perm = all_perm - 1
 
         return all_perm
 
+def rgb_jittering(im):
+    im = np.array(im,np.float32)
+    for ch in range(3):
+        thisRand = np.random.uniform(0.8, 1.2)
+        im[:,:,ch] *= thisRand
+    shiftVal = np.random.randint(0,6)
+    if np.random.randint(2) == 1:
+        shiftVal = -shiftVal
+    im += shiftVal
+    im = im.astype(np.uint8)
+    im = im.astype(np.float32)
+    return im
+
 if __name__ == "__main__":
-    import utils
     import matplotlib.pyplot as plt
-    train_set = jigsawLoader(root_dir="/home/ken/Documents/Dataset/", mode='val')
+    train_set = jigsawLoader(root_dir="/home/ken/Documents/Dataset/", mode='train', dataset='imagenet')
     train_loader = data.DataLoader(train_set, batch_size=1, shuffle=False, num_workers=0)
-    tiles, order = iter(train_loader).next()
+    tiles, order,img = iter(train_loader).next()
+    img = transforms.ToPILImage(mode='RGB')(img.squeeze())
+    # img.save('jigsawcityexample.png')
+    img.save('jigsawexample.png')
     plt.subplot(331)
     plt.imshow(transforms.ToPILImage(mode='RGB')(tiles.squeeze()[0]))
     plt.subplot(332)
